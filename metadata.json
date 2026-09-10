@@ -1,0 +1,6 @@
+{
+  "name": "BusiMind Library",
+  "description": "BusiMind Library: The premier public business literature and financial intelligence repository with curated books, academic research, and institutional valuation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

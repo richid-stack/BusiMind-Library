@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // Global validation helpers
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    
+    function isValidBook(data) {
+      return data.keys().hasAll(['title', 'author', 'category', 'difficulty', 'ratingScore'])
+        && data.title is string && data.title.size() <= 500
+        && data.author is string && data.author.size() <= 500
+        && data.difficulty in ['beginner', 'intermediate', 'advanced']
+        && data.ratingScore is number;
+    }
+    
+    function isValidReadingList(data) {
+      return data.keys().hasAll(['telegramUserId', 'bookId', 'status', 'addedAt'])
+        && data.telegramUserId is string
+        && data.status in ['want_to_read', 'reading', 'completed'];
+    }
+    
+    function isValidSearchLog(data) {
+      return data.keys().hasAll(['query', 'intent', 'matchedCount', 'timestamp'])
+        && data.query is string && data.query.size() <= 500
+        && data.matchedCount is number;
+    }
+    
+    function isValidBookRequest(data) {
+      return data.keys().hasAll(['requestedTitle', 'status', 'requestCount'])
+        && data.status in ['pending', 'acquired', 'dismissed']
+        && data.requestCount is number;
+    }
+
+    match /books/{bookId} {
+      allow read: if true;
+      allow create: if isValidId(bookId) && isValidBook(incoming());
+      allow update: if isValidBook(incoming());
+      allow delete: if true;
+    }
+    
+    match /readingLists/{itemId} {
+      allow read: if true;
+      allow create: if isValidId(itemId) && isValidReadingList(incoming());
+      allow update: if isValidReadingList(incoming());
+      allow delete: if true;
+    }
+    
+    match /searchLogs/{logId} {
+      allow read: if true;
+      allow create: if isValidId(logId) && isValidSearchLog(incoming());
+      allow update: if isValidSearchLog(incoming());
+      allow delete: if true;
+    }
+    
+    match /bookRequests/{requestId} {
+      allow read: if true;
+      allow create: if isValidId(requestId) && isValidBookRequest(incoming());
+      allow update: if isValidBookRequest(incoming());
+      allow delete: if true;
+    }
+    
+    match /dailyUsage/{usageId} {
+      allow read, write: if true;
+    }
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

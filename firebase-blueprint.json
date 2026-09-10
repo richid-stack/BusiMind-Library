@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "Book": {
+      "title": "Book",
+      "description": "A book in the repository",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 500 },
+        "author": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "whyRecommended": { "type": "string", "maxLength": 2000 },
+        "bestFor": { "type": "string", "maxLength": 500 },
+        "difficulty": { "type": "string", "enum": ["beginner", "intermediate", "advanced"] },
+        "tags": { "type": "array" },
+        "publicationYear": { "type": "number" },
+        "ratingScore": { "type": "number" },
+        "isFeatured": { "type": "boolean" },
+        "distributionType": { "type": "string", "enum": ["telegram_repository", "external_only", "both"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "author", "category", "description", "whyRecommended", "bestFor", "difficulty", "tags", "publicationYear", "ratingScore", "isFeatured", "distributionType", "createdAt", "updatedAt"]
+    },
+    "ReadingListItem": {
+      "title": "ReadingListItem",
+      "description": "A book saved to a user's reading list",
+      "type": "object",
+      "properties": {
+        "telegramUserId": { "type": "string", "maxLength": 128 },
+        "bookId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["want_to_read", "reading", "completed"] },
+        "addedAt": { "type": "string" }
+      },
+      "required": ["telegramUserId", "bookId", "status", "addedAt"]
+    },
+    "SearchLog": {
+      "title": "SearchLog",
+      "description": "A log of a user search query",
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "maxLength": 500 },
+        "intent": { "type": "string", "maxLength": 100 },
+        "matchedCount": { "type": "number" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["query", "intent", "matchedCount", "timestamp"]
+    },
+    "BookRequest": {
+      "title": "BookRequest",
+      "description": "A request for a book not yet in the library",
+      "type": "object",
+      "properties": {
+        "requestedTitle": { "type": "string", "maxLength": 500 },
+        "query": { "type": "string", "maxLength": 500 },
+        "requestCount": { "type": "number" },
+        "lastRequestedAt": { "type": "string" },
+        "requestedByUserIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["pending", "acquired", "dismissed"] }
+      },
+      "required": ["requestedTitle", "query", "requestCount", "lastRequestedAt", "requestedByUserIds", "status"]
+    },
+    "DailyUsage": {
+      "title": "DailyUsage",
+      "description": "Daily bot usage limits per user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 10 },
+        "used": { "type": "number" }
+      },
+      "required": ["userId", "date", "used"]
+    }
+  },
+  "firestore": {
+    "books/{bookId}": {
+      "schema": { "$ref": "#/entities/Book" },
+      "description": "The main catalog of books."
+    },
+    "readingLists/{itemId}": {
+      "schema": { "$ref": "#/entities/ReadingListItem" },
+      "description": "Users' reading lists."
+    },
+    "searchLogs/{logId}": {
+      "schema": { "$ref": "#/entities/SearchLog" },
+      "description": "Search history."
+    },
+    "bookRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/BookRequest" },
+      "description": "Pending requests for new books."
+    },
+    "dailyUsage/{usageId}": {
+      "schema": { "$ref": "#/entities/DailyUsage" },
+      "description": "Usage counters for rate limiting."
+    }
+  }
+}

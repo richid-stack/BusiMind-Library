@@ -1,0 +1,122 @@
+--- server/telegram/bot.ts
++++ server/telegram/bot.ts
+@@ -2,6 +2,7 @@
+ import { InlineKeyboard } from 'grammy';
+ import { BusiMindStore } from './store';
+ import { autoIndexChannelAsset, getBookHelpExplanation, queryBookForRAG } from '../services/indexer';
++import pdfParse from 'pdf-parse';
++import fetch from 'node-fetch';
++import { GoogleGenAI, Type } from '@google/genai';
+ 
+ const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!);
+ const store = new BusiMindStore();
+@@ -1016,6 +1017,80 @@
+     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+   });
+ 
++  // Handle deep scan
++  bot.callbackQuery(/^scan_(.+)$/, async (ctx) => {
++    const bookId = ctx.match[1];
++    const book = store.getBookById(bookId);
++    
++    if (!book || !book.fileId || book.fileType !== 'application/pdf') {
++      return ctx.answerCallbackQuery({ text: '❌ Cannot scan this file (not a PDF or file ID missing).', show_alert: true });
++    }
++    
++    await ctx.answerCallbackQuery({ text: '🔍 Downloading and deeply analyzing PDF... This may take up to 20 seconds.' });
++    
++    try {
++      // Get file URL from Telegram
++      const file = await bot.api.getFile(book.fileId);
++      const url = \`https://api.telegram.org/file/bot\${process.env.TELEGRAM_BOT_TOKEN}/\${file.file_path}\`;
++      
++      const response = await fetch(url);
++      const buffer = await response.arrayBuffer();
++      
++      // Extract text from the PDF buffer
++      const pdfData = await pdfParse(Buffer.from(buffer));
++      const snippet = pdfData.text.substring(0, 4000); // Send first 4k chars to Gemini
++      
++      if (!snippet || snippet.length < 50) {
++        return ctx.reply('❌ Could not extract enough text from the PDF for a deep scan.');
++      }
++
++      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
++      const prompt = \`I am trying to identify a book whose filename is unreadable. Read the following text extracted from the first few pages of the PDF. Based on this excerpt, identify the true canonical title, author, category, and ISBN-13 of the book. 
++      
++      TEXT EXCERPT:
++      \${snippet}
++      
++      Return pure JSON matching this schema:
++      {
++        "title": "Clean Canonical Title",
++        "author": "Real Author",
++        "category": "Entrepreneurship | Money & Investing | Leadership & Management | Marketing & Sales",
++        "isbn13": "978..."
++      }\`;
++
++      const aiResponse = await ai.models.generateContent({
++        model: 'gemini-3.8-flash',
++        contents: prompt,
++        config: {
++          responseMimeType: 'application/json',
++          responseSchema: {
++            type: Type.OBJECT,
++            properties: {
++              title: { type: Type.STRING },
++              author: { type: Type.STRING },
++              category: { type: Type.STRING },
++              isbn13: { type: Type.STRING, nullable: true }
++            },
++            required: ['title', 'author', 'category']
++          }
++        }
++      });
++      
++      const parsed = JSON.parse(aiResponse.text || '{}');
++      
++      if (parsed.title) {
++        let newCover = book.coverImageUrl;
++        if (parsed.isbn13) {
++          const cleanIsbn = parsed.isbn13.replace(/[^0-9X]/gi, '');
++          if (cleanIsbn.length >= 10) newCover = \`https://covers.openlibrary.org/b/isbn/\${cleanIsbn}-L.jpg\`;
++        }
++        
++        const updatedBook = store.updateBook(book.id, {
++          title: parsed.title,
++          author: parsed.author,
++          category: parsed.category,
++          coverImageUrl: newCover
++        });
++        
++        await ctx.reply(\`✅ **Deep Scan Complete!**\n\nIdentified as:\\n📖 *\${parsed.title}*\\n✍️ by \${parsed.author}\\n\\nThe store has been updated automatically.\`, {
++          parse_mode: 'Markdown',
++          reply_markup: new InlineKeyboard().text('📖 View Updated Card', \`book_\${book.id}\`)
++        });
++      } else {
++        await ctx.reply('⚠️ Deep scan completed but could not definitively identify the book from the text excerpt.');
++      }
++    } catch (err: any) {
++      console.error('Deep scan error:', err);
++      await ctx.reply(\`❌ Error during deep scan: \${err.message}\`);
++    }
++  });
++
+   // Admin view requests callback
+   bot.callbackQuery('admin_view_requests', async (ctx) => {
+     await ctx.answerCallbackQuery();
+@@ -1112,6 +1187,7 @@
+             parse_mode: 'Markdown',
+             reply_markup: new InlineKeyboard()
+               .text('📖 View Asset Card', \`book_\${result.book.id}\`)
++              .text('🔍 Deep Scan PDF', \`scan_\${result.book.id}\`)
+               .text('🏠 Main Menu', 'menu_main'),
+           }
+         );
+@@ -1196,6 +1272,7 @@
+                 .text('📖 Open Card', \`book_\${result.book.id}\`)
+                 .text('⚡ Test Deliver', \`dl_\${result.book.id}\`)
++                .text('🔍 Deep Scan', \`scan_\${result.book.id}\`)
+                 .text('🏠 Menu', 'menu_main'),
+             }
+           );

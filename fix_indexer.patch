@@ -1,0 +1,89 @@
+--- server/services/indexer.ts
++++ server/services/indexer.ts
+@@ -107,7 +107,31 @@
+ Return pure JSON.`;
+ 
+-      const response = await ai.models.generateContent({
+-        model: 'gemini-3.8-flash',
+-        contents: prompt,
+-        config: {
+-          responseMimeType: 'application/json',
+-          responseSchema: {
+-            type: Type.OBJECT,
+-            properties: {
+-              matchedBookId: { type: Type.STRING, nullable: true },
+-              title: { type: Type.STRING },
+-              author: { type: Type.STRING },
+-              category: { type: Type.STRING },
+-              resourceType: { type: Type.STRING },
+-              description: { type: Type.STRING },
+-              whyRecommended: { type: Type.STRING },
+-              howItHelps: { type: Type.STRING },
+-              keyTakeaways: {
+-                type: Type.ARRAY,
+-                items: { type: Type.STRING },
+-              },
+-              bestFor: { type: Type.STRING },
+-              difficulty: { type: Type.STRING },
+-              publicationYear: { type: Type.INTEGER },
+-              isbn13: { type: Type.STRING, nullable: true },
+-              tags: {
+-                type: Type.ARRAY,
+-                items: { type: Type.STRING },
+-              },
+-            },
+-            required: ['title', 'author', 'category', 'description', 'whyRecommended', 'howItHelps', 'keyTakeaways', 'tags'],
+-          },
+-        },
+-      });
++      let response;
++      let retries = 0;
++      const maxRetries = 5;
++      while (retries <= maxRetries) {
++        try {
++          response = await ai.models.generateContent({
++            model: 'gemini-3.8-flash',
++            contents: prompt,
++            config: {
++              responseMimeType: 'application/json',
++              responseSchema: {
++                type: Type.OBJECT,
++                properties: {
++                  matchedBookId: { type: Type.STRING, nullable: true },
++                  title: { type: Type.STRING },
++                  author: { type: Type.STRING },
++                  category: { type: Type.STRING },
++                  resourceType: { type: Type.STRING },
++                  description: { type: Type.STRING },
++                  whyRecommended: { type: Type.STRING },
++                  howItHelps: { type: Type.STRING },
++                  keyTakeaways: {
++                    type: Type.ARRAY,
++                    items: { type: Type.STRING },
++                  },
++                  bestFor: { type: Type.STRING },
++                  difficulty: { type: Type.STRING },
++                  publicationYear: { type: Type.INTEGER },
++                  isbn13: { type: Type.STRING, nullable: true },
++                  tags: {
++                    type: Type.ARRAY,
++                    items: { type: Type.STRING },
++                  },
++                },
++                required: ['title', 'author', 'category', 'description', 'whyRecommended', 'howItHelps', 'keyTakeaways', 'tags'],
++              },
++            },
++          });
++          break;
++        } catch (err: any) {
++          if (err?.status === 429 || err?.message?.includes('429')) {
++            retries++;
++            if (retries > maxRetries) throw err;
++            const waitTime = Math.pow(2, retries) * 1000 + Math.random() * 1000;
++            console.log(`[Indexer] Rate limit hit. Retrying in ${Math.round(waitTime/1000)}s...`);
++            await new Promise((resolve) => setTimeout(resolve, waitTime));
++          } else {
++            throw err;
++          }
++        }
++      }
