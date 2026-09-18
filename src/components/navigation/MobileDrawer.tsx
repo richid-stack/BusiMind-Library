@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import { BusiMindLogo } from '../BusiMindLogo';
+import { useAuth } from '../../context/AuthContext';
 
 interface Props {
   isOpen: boolean;
@@ -51,6 +52,8 @@ export const MobileDrawer: React.FC<Props> = ({
   onOpenBookRequest,
   bookCount,
 }) => {
+  const { user, telegramChatId } = useAuth();
+  
   if (!isOpen) return null;
 
   const handleNav = (tab: string) => {
@@ -104,72 +107,78 @@ export const MobileDrawer: React.FC<Props> = ({
             >
               <div className="flex items-center gap-3">
                 <BookOpen className="w-5 h-5 text-[#f3a847]" />
-                <span>Executive Bookstore</span>
+                <span>{isAdmin ? 'Executive Bookstore' : 'BusiMind Library'}</span>
               </div>
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
-                {bookCount}
-              </span>
+              {isAdmin && (
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
+                  {bookCount}
+                </span>
+              )}
             </button>
 
-            <button
-              onClick={() => handleNav('valuation')}
-              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
-                activeTab === 'valuation'
-                  ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
-                  : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <LineChart className="w-5 h-5 text-[#007600]" />
-                <span>Financial Terminal (DCF)</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => handleNav('valuation')}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
+                    activeTab === 'valuation'
+                      ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
+                      : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <LineChart className="w-5 h-5 text-[#007600]" />
+                    <span>Financial Terminal (DCF)</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                </button>
 
-            <button
-              onClick={() => handleNav('research')}
-              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
-                activeTab === 'research'
-                  ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
-                  : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <GraduationCap className="w-5 h-5 text-indigo-600" />
-                <span>Academic Research (DOI)</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
+                <button
+                  onClick={() => handleNav('research')}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
+                    activeTab === 'research'
+                      ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
+                      : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <GraduationCap className="w-5 h-5 text-indigo-600" />
+                    <span>Academic Research (DOI)</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                </button>
 
-            <button
-              onClick={() => handleNav('analytics')}
-              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
-                activeTab === 'analytics'
-                  ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
-                  : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <PieChart className="w-5 h-5 text-purple-600" />
-                <span>Portfolio & Stress Testing</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
+                <button
+                  onClick={() => handleNav('analytics')}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
+                    activeTab === 'analytics'
+                      ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
+                      : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <PieChart className="w-5 h-5 text-purple-600" />
+                    <span>Portfolio & Stress Testing</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                </button>
 
-            <button
-              onClick={() => handleNav('macro')}
-              className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
-                activeTab === 'macro'
-                  ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
-                  : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <TrendingUp className="w-5 h-5 text-[#de7921]" />
-                <span>Macro & BoG Benchmarks</span>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
+                <button
+                  onClick={() => handleNav('macro')}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors ${
+                    activeTab === 'macro'
+                      ? 'bg-amber-50 text-[#c45500] font-bold border-l-4 border-[#f3a847]'
+                      : 'text-gray-800 hover:bg-gray-50 border-l-4 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <TrendingUp className="w-5 h-5 text-[#de7921]" />
+                    <span>Macro & BoG Benchmarks</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Admin Tools (Curator Only) */}
@@ -247,14 +256,14 @@ export const MobileDrawer: React.FC<Props> = ({
             </button>
 
             <a
-              href="https://t.me/BusiMind_bot"
+              href={telegramChatId ? "https://t.me/BusiMind_bot" : (user ? `https://t.me/BusiMind_bot?start=link_${user.uid}` : "https://t.me/BusiMind_bot")}
               target="_blank"
               rel="noreferrer"
               className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
             >
               <div className="flex items-center gap-3">
                 <Send className="w-4 h-4 text-[#229ed9]" />
-                <span>Open Telegram Bot (@BusiMind_bot)</span>
+                <span>{telegramChatId ? 'Open Telegram Bot' : 'Link Telegram Account'} (@BusiMind_bot)</span>
               </div>
               <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
             </a>
@@ -296,8 +305,8 @@ export const MobileDrawer: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Drawer Footer (Admin Sign Out only when authenticated as Admin) */}
-        {isAdmin && (
+        {/* Drawer Footer (Sign Out for all users) */}
+        {user && (
           <div className="p-3 bg-gray-50 border-t border-gray-200">
             <button
               onClick={() => {
@@ -307,7 +316,7 @@ export const MobileDrawer: React.FC<Props> = ({
               className="w-full py-2 px-3 rounded-md bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold flex items-center justify-center gap-2 border border-red-200 transition-colors"
             >
               <LogOut className="w-4 h-4" />
-              Sign Out of Admin Mode
+              Sign Out
             </button>
           </div>
         )}

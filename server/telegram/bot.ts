@@ -1,9 +1,13 @@
 import { Bot, InlineKeyboard, Context, InputFile } from 'grammy';
 import { GoogleGenAI, Type } from '@google/genai';
+import { db } from '../data/firestoreConfig';
+import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { pairingStore } from '../data/pairingStore';
 import { store } from '../data/store';
 import { searchBooksWithAI, generateReadingPath, askAboutBook, isGeminiAvailable, resolveBookOrIntent } from '../gemini';
 import { autoIndexChannelAsset } from '../services/indexer';
 import { sanitizeBookFileName, generateDeliveryCaption } from '../services/fileSanitizer';
+import { autoDeleteService } from '../services/autoDeleteService';
 import { Book } from '../../src/types';
 import { safeGenerateContent } from '../utils/geminiHelper';
 import { extractPdfSnippetFromFileId } from '../services/pdfExtractor';
@@ -27,6 +31,10 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 export const isBotTokenConfigured = Boolean(token && token.trim() !== '' && !token.includes('YOUR_'));
 
 export const bot = isBotTokenConfigured ? new Bot(token!) : null;
+
+if (bot) {
+  autoDeleteService.setBot(bot);
+}
 
 /**
  * Delivers a book file to the user with the actual Telegram attachment filename
@@ -227,7 +235,9 @@ export function getMainMenuKeyboard(userId?: number): InlineKeyboard {
     .text('💼 Portfolio & Trade', 'menu_portfolio')
     .text('⚡ Macro Stress-Test', 'stress_test_cedi')
     .row()
+    .text('🔗 Link Web Account', 'menu_link_web')
     .text('📚 Reading List', 'menu_reading_list')
+    .row()
     .text(limitLabel, 'menu_limit');
 }
 
@@ -259,20 +269,356 @@ export function getBookDetailsKeyboard(book: Book, telegramUserId: number): Inli
 
 // --- BOT INITIALIZATION & HANDLERS ---
 
+/**
+ * Robust handler for pairing codes and email links from Web UI.
+ * Connects Telegram Chat ID to the user's Firestore document and delivers any pending book.
+ */
+async function handlePairingOrEmailInput(ctx: Context, rawInput: string): Promise<boolean> {
+  const input = rawInput.trim();
+  const chatIdStr = ctx.from?.id ? String(ctx.from.id) : '';
+  const usernameStr = ctx.from?.username || null;
+  if (!chatIdStr) return false;
+
+  // 1. Is it a 6-digit pairing code (e.g. "492815" or "p_492815")?
+  const cleanCode = input.replace(/^p_/, '').replace(/-/g, '').trim();
+  if (/^\d{6}$/.test(cleanCode)) {
+    const pairing = pairingStore.consumePairing(cleanCode);
+    if (pairing) {
+      try {
+        // Enforce 1-to-1 mapping: Disconnect any other user accounts currently bound to this Telegram account
+        try {
+          const conflictQuery = query(collection(db, 'users'), where('telegramChatId', '==', chatIdStr));
+          const conflictSnaps = await getDocs(conflictQuery);
+          for (const conflictDoc of conflictSnaps.docs) {
+            if (conflictDoc.id !== pairing.uid) {
+              await setDoc(conflictDoc.ref, {
+                telegramChatId: null,
+                telegramUsername: null,
+                unlinkedAt: new Date().toISOString(),
+                unlinkReason: 'relinked_to_another_account',
+              }, { merge: true });
+            }
+          }
+        } catch (unifyErr: any) {
+          console.warn('[Pairing 1-to-1 conflict check error]:', unifyErr?.message || unifyErr);
+        }
+
+        await setDoc(doc(db, 'users', pairing.uid), {
+          telegramChatId: chatIdStr,
+          telegramUsername: usernameStr,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+
+        await ctx.reply(
+          `✅ *BusiMind Web Profile Connected!*\n\n` +
+          `Your Telegram account has been linked to your BusiMind Web session!\n\n` +
+          `🆔 *Your Chat ID:* \`${chatIdStr}\`\n\n` +
+          (pairing.bookId ? `🚀 Delivering your requested volume immediately...` : `Any books you request on the website will now arrive straight here!`),
+          { parse_mode: 'Markdown' }
+        );
+
+        if (pairing.bookId) {
+          const book = store.getBookById(pairing.bookId);
+          if (book && ctx.from?.id) {
+            const usage = store.getDailyUsage(ctx.from.id);
+            if (!usage.isUnlimited && usage.remaining <= 0) {
+              await ctx.reply(
+                `⏳ *Daily Limit Reached (3 of 3 requests)*\n\n` +
+                `You have already utilized your 3 free book requests for today.\n\n` +
+                `🔄 *Reset Schedule:* Midnight 00:00 UTC (in \`${usage.timeUntilReset}\`)\n\n` +
+                `_Your account link is active, and your limit will reset tonight!_`,
+                { parse_mode: 'Markdown' }
+              );
+            } else {
+              try {
+                const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+                  chatId: ctx.from.id,
+                  book,
+                  source: 'pairing',
+                });
+                if (delRes.success) {
+                  store.incrementDailyUsage(ctx.from.id);
+                  store.incrementDailyUsage(pairing.uid);
+                } else {
+                  await ctx.reply(`📖 *${book.title}*\nBy ${book.author}\n\nYour account is linked! Tap below to access:`, {
+                    parse_mode: 'Markdown',
+                    reply_markup: new InlineKeyboard().text('📖 View Book Card', `book_${book.id}`),
+                  });
+                }
+              } catch (deliverErr: any) {
+                console.error('[Pairing delivery error]:', deliverErr?.message || deliverErr);
+              }
+            }
+          }
+        }
+        return true;
+      } catch (err: any) {
+        console.error('[handlePairingCode error]:', err);
+        await ctx.reply(`⚠️ Account link recorded. Your Chat ID is \`${chatIdStr}\`.`, { parse_mode: 'Markdown' });
+        return true;
+      }
+    } else {
+      await ctx.reply(
+        `⚠️ Pairing code \`${cleanCode}\` was not found or has expired.\n\n` +
+        `💡 *Quick Connect:*\n` +
+        `Your Chat ID is \`${chatIdStr}\`. Enter it directly on the BusiMind website modal to link in 1 click!`,
+        { parse_mode: 'Markdown' }
+      );
+      return true;
+    }
+  }
+
+  // 2. Is it an email address?
+  if (/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(input.toLowerCase())) {
+    const email = input.toLowerCase();
+    try {
+      // Enforce 1-to-1: Disconnect any other user holding this Telegram account
+      try {
+        const conflictQuery = query(collection(db, 'users'), where('telegramChatId', '==', chatIdStr));
+        const conflictSnaps = await getDocs(conflictQuery);
+        for (const conflictDoc of conflictSnaps.docs) {
+          if (conflictDoc.data()?.email !== email) {
+            await setDoc(conflictDoc.ref, {
+              telegramChatId: null,
+              telegramUsername: null,
+              unlinkedAt: new Date().toISOString(),
+              unlinkReason: 'relinked_to_another_account',
+            }, { merge: true });
+          }
+        }
+      } catch (unifyErr: any) {
+        console.warn('[Email link 1-to-1 conflict check error]:', unifyErr?.message || unifyErr);
+      }
+
+      const q = query(collection(db, 'users'), where('email', '==', email));
+      const snaps = await getDocs(q);
+
+      if (!snaps.empty) {
+        for (const userDoc of snaps.docs) {
+          await setDoc(doc(db, 'users', userDoc.id), {
+            telegramChatId: chatIdStr,
+            telegramUsername: usernameStr,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+      } else {
+        // Create/link a placeholder user doc so future logins connect automatically
+        const emailDocId = email.replace(/[^a-z0-9]/g, '_');
+        await setDoc(doc(db, 'users', emailDocId), {
+          email,
+          telegramChatId: chatIdStr,
+          telegramUsername: usernameStr,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+
+      await ctx.reply(
+        `✅ *Connected to ${email}!* 🎉\n\n` +
+        `Your Telegram account is now linked to your BusiMind account.\n\n` +
+        `🆔 *Your Chat ID:* \`${chatIdStr}\`\n\n` +
+        `Any book you request on the website will now be delivered directly to this chat!`,
+        { parse_mode: 'Markdown' }
+      );
+      return true;
+    } catch (err: any) {
+      console.error('[handleEmailLink error]:', err);
+      await ctx.reply(`⚠️ Could not link email: ${err.message}. Your Chat ID is \`${chatIdStr}\`.`, { parse_mode: 'Markdown' });
+      return true;
+    }
+  }
+
+  return false;
+}
+
 if (bot) {
   // 1. /start command
   bot.command('start', async (ctx) => {
     userSessionState.delete(ctx.from?.id || 0);
+
+    const payload = (ctx.match || '').trim();
+
+    // Handle short pairing code: /start p_123456 or 6-digit code
+    if (payload && (payload.startsWith('p_') || /^\d{6}$/.test(payload))) {
+      const handled = await handlePairingOrEmailInput(ctx, payload);
+      if (handled) return;
+    }
+
+    // Handle Telegram linking from Web UI (legacy link_uid_book_id)
+    if (payload && payload.startsWith('link_')) {
+      const fullLink = payload.replace('link_', '');
+      let firebaseUid = fullLink;
+      let bookIdToDeliver: string | null = null;
+      if (fullLink.includes('_book_')) {
+        const parts = fullLink.split('_book_');
+        firebaseUid = parts[0];
+        bookIdToDeliver = parts[1];
+      }
+
+      const chatIdStr = ctx.from?.id ? String(ctx.from.id) : '';
+      const usernameStr = ctx.from?.username || null;
+
+      try {
+        if (firebaseUid && chatIdStr) {
+          // Enforce 1-to-1
+          try {
+            const conflictQuery = query(collection(db, 'users'), where('telegramChatId', '==', chatIdStr));
+            const conflictSnaps = await getDocs(conflictQuery);
+            for (const conflictDoc of conflictSnaps.docs) {
+              if (conflictDoc.id !== firebaseUid) {
+                await setDoc(conflictDoc.ref, {
+                  telegramChatId: null,
+                  telegramUsername: null,
+                  unlinkedAt: new Date().toISOString(),
+                  unlinkReason: 'relinked_to_another_account',
+                }, { merge: true });
+              }
+            }
+          } catch (unifyErr: any) {
+            console.warn('[legacy link 1-to-1 conflict check error]:', unifyErr?.message || unifyErr);
+          }
+
+          await setDoc(doc(db, 'users', firebaseUid), {
+            telegramChatId: chatIdStr,
+            telegramUsername: usernameStr,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+
+        await ctx.reply(
+          '✅ *Telegram Connected!*\n\n' +
+          'Your Telegram account has been linked to your BusiMind Web profile. ' +
+          `\n\n🆔 *Your Chat ID:* \`${chatIdStr}\`\n\n` +
+          'Any books you request on the website will now be sent directly here!',
+          { parse_mode: 'Markdown' }
+        );
+
+        if (bookIdToDeliver) {
+          const book = store.getBookById(bookIdToDeliver);
+          if (book && ctx.from?.id) {
+            const usage = store.getDailyUsage(ctx.from.id);
+            if (!usage.isUnlimited && usage.remaining <= 0) {
+              await ctx.reply(
+                `⏳ *Daily Limit Reached (3 of 3 requests)*\n\n` +
+                `You have already utilized your 3 free book requests for today.\n\n` +
+                `🔄 *Reset Schedule:* Midnight 00:00 UTC (in \`${usage.timeUntilReset}\`)\n\n` +
+                `_Your account link is active, and your limit will reset tonight!_`,
+                { parse_mode: 'Markdown' }
+              );
+            } else {
+              try {
+                const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+                  chatId: ctx.from.id,
+                  book,
+                  source: 'link',
+                });
+                if (delRes.success) {
+                  store.incrementDailyUsage(ctx.from.id);
+                  if (firebaseUid) store.incrementDailyUsage(firebaseUid);
+                } else {
+                  await ctx.reply(`📖 *${book.title}*\nBy ${book.author}\n\nYour account is linked! You can also tap below to access this volume:`, {
+                    parse_mode: 'Markdown',
+                    reply_markup: new InlineKeyboard().text('📖 View Book Card', `book_${book.id}`),
+                  });
+                }
+              } catch (deliverErr: any) {
+                console.error('[Auto-deliver on link error]:', deliverErr?.message || deliverErr);
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to link telegram account:', err?.message || err);
+        await ctx.reply(`⚠️ Account link recorded locally. Your Chat ID is \`${chatIdStr}\`. You can also enter it on the BusiMind website under your profile.`, { parse_mode: 'Markdown' });
+      }
+      return;
+    }
+
+    // Handle direct book link: /start book_<id>
+    if (payload && payload.startsWith('book_')) {
+      const bookId = payload.replace('book_', '');
+      const book = store.getBookById(bookId);
+      if (book && ctx.from?.id) {
+        const usage = store.getDailyUsage(ctx.from.id);
+        if (!usage.isUnlimited && usage.remaining <= 0) {
+          const timeInfo = store.getTimeUntilMidnight();
+          await ctx.reply(
+            `⏳ *Daily Limit Reached (3 of 3 requests)*\n\n` +
+            `You have utilized your 3 free book requests for today.\n\n` +
+            `🔄 *Reset Schedule:* Midnight 00:00 UTC\n` +
+            `⏱️ *Time until reset:* \`${timeInfo.formatted}\`\n\n` +
+            `_See you after midnight for your next 3 requests!_`,
+            {
+              parse_mode: 'Markdown',
+              reply_markup: new InlineKeyboard()
+                .text('📖 View Book Details', `book_${book.id}`)
+                .text('🏠 Main Menu', 'menu_main'),
+            }
+          );
+          return;
+        }
+
+        try {
+          const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+            chatId: ctx.from.id,
+            book,
+            source: 'direct_book_start',
+          });
+          if (delRes.success) {
+            store.incrementDailyUsage(ctx.from.id);
+            return;
+          }
+        } catch (deliverErr: any) {
+          console.error('[Direct book start delivery error]:', deliverErr?.message || deliverErr);
+        }
+      }
+
+        // Show book card if direct copyMessage wasn't available
+        const cardText = `📖 *${book.title}*\n*By ${book.author}* (${book.publicationYear || 'Classic'})\n\n` +
+          `• Category: *${book.category}*\n` +
+          `• Rating: *⭐ ${book.ratingScore.toFixed(1)}/5.0*\n\n` +
+          `${book.description.slice(0, 350)}...`;
+        await ctx.reply(cardText, {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text('📖 Get Book Now', `get_book_${book.id}`)
+            .row()
+            .text('🤖 Ask About This Book', `ask_book_${book.id}`)
+            .text('🔎 Similar Books', `sim_book_${book.id}`),
+        });
+        return;
+      }
+
     const usage = ctx.from?.id ? store.getDailyUsage(ctx.from.id) : null;
     const limitNote = usage
       ? (usage.isUnlimited ? '• *Account:* Administrator (Unlimited Requests)' : `• *Daily Allowance:* ${usage.remaining}/3 requests remaining today (resets at 00:00 UTC)`)
       : '• *Daily Allowance:* 3 requests per day (resets at 00:00 UTC)';
 
-    const welcome = `*BusiMind*\n\nYour personal guide to business knowledge.\n\n${limitNote}\n\nTell me what you want to learn, discover hand-curated business classics, or choose a category below:`;
+    const chatIdStr = ctx.from?.id ? String(ctx.from.id) : '';
+    const chatIdDisplay = chatIdStr ? `\n• *Your Chat ID:* \`${chatIdStr}\`` : '';
+
+    const welcome = `*BusiMind*\n\nYour personal guide to business knowledge.\n\n${limitNote}${chatIdDisplay}\n\n` +
+      `🔗 *Website Linking:*\n` +
+      `• Enter your Chat ID \`${chatIdStr}\` on the BusiMind website\n` +
+      `• Or reply here with your email: \`/link your-email@gmail.com\`\n` +
+      `• Or reply with a 6-digit pairing code from the website: \`/pair 123456\`\n\n` +
+      `Tell me what you want to learn, discover hand-curated business classics, or choose a category below:`;
     await ctx.reply(welcome, {
       parse_mode: 'Markdown',
       reply_markup: getMainMenuKeyboard(ctx.from?.id),
     });
+  });
+
+  // /id or /chatid command to easily get telegram chat id
+  bot.command(['id', 'chatid', 'myid', 'whoami'], async (ctx) => {
+    const chatId = ctx.from?.id;
+    const username = ctx.from?.username ? `@${ctx.from.username}` : '(no username)';
+    await ctx.reply(
+      `🆔 *Your Telegram Information:*\n\n` +
+      `• *Chat ID:* \`${chatId}\`\n` +
+      `• *Username:* ${username}\n\n` +
+      `You can paste your Chat ID on the BusiMind website under your profile or when requesting a book to connect instantly!`,
+      { parse_mode: 'Markdown' }
+    );
   });
 
   // /limit or /allowance command
@@ -376,44 +722,102 @@ if (bot) {
     await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
   });
 
-  // 4. /link <book_id> <message_id> admin shortcut
+  // /pair or /connect command
+  bot.command(['pair', 'connect'], async (ctx) => {
+    const arg = (ctx.match || '').trim();
+    if (!arg) {
+      userSessionState.set(ctx.from.id, { action: 'awaiting_web_link' });
+      return ctx.reply(
+        `🔗 *Connect Telegram to BusiMind Web*\n\n` +
+        `🆔 *Your Chat ID:* \`${ctx.from.id}\`\n\n` +
+        `Usage:\n` +
+        `• \`/pair 123456\` (with 6-digit code from website)\n` +
+        `• Or reply with your email: \`/link user@example.com\``,
+        { parse_mode: 'Markdown' }
+      );
+    }
+    const handled = await handlePairingOrEmailInput(ctx, arg);
+    if (!handled) {
+      await ctx.reply(`⚠️ Unrecognized code or format. Send your 6-digit Web code or your account email address.`);
+    }
+  });
+
+  // 4. /link command: supports both user account linking and admin message linking
   bot.command('link', async (ctx) => {
+    const raw = (ctx.match || '').trim();
+    const parts = raw.split(/\s+/);
     const adminId = process.env.ADMIN_TELEGRAM_ID ? Number(process.env.ADMIN_TELEGRAM_ID) : null;
-    if (!adminId || ctx.from?.id !== adminId) {
-      return ctx.reply('⛔ Unauthorized');
+
+    // Check if admin is running channel message link: /link <book_id> <message_id>
+    if (parts.length >= 2 && !parts[0].includes('@') && !isNaN(Number(parts[1])) && adminId && ctx.from?.id === adminId) {
+      const [bookId, msgIdStr] = parts;
+      const msgId = parseInt(msgIdStr, 10);
+      const channelId = process.env.TELEGRAM_CHANNEL_ID;
+      if (!channelId) {
+        return ctx.reply('⚠️ Please set TELEGRAM_CHANNEL_ID in your environment variables first.');
+      }
+
+      const repliedDoc = ctx.message?.reply_to_message?.document;
+      const repliedAudio = ctx.message?.reply_to_message?.audio;
+      const fileId = repliedDoc?.file_id || repliedAudio?.file_id;
+      const rawFileName = repliedDoc?.file_name || repliedAudio?.file_name;
+      const cleanName = rawFileName ? sanitizeBookFileName(rawFileName) : undefined;
+
+      const updated = store.linkTelegramMessage(bookId, channelId, msgId, cleanName, fileId);
+      if (!updated) {
+        return ctx.reply(`❌ Book with ID \`${bookId}\` not found in database.`);
+      }
+
+      const fileNotice = fileId ? `\n📄 *Direct File Stamped:* \`${cleanName || updated.fileName || 'Attached'}\`` : '';
+      return ctx.reply(`✅ Successfully linked book *${updated.title}* to Channel \`${channelId}\` at Message ID \`${msgId}\`!${fileNotice}`, {
+        parse_mode: 'Markdown',
+      });
     }
 
-    const parts = (ctx.match || '').trim().split(/\s+/);
-    if (parts.length < 2) {
-      return ctx.reply('Usage: `/link <book_id> <telegram_message_id>`\nExample: `/link lean-startup 42`', { parse_mode: 'Markdown' });
+    // Otherwise, treat as user account linking (e.g. /link hamiltonyh727@gmail.com or /link 492815)
+    if (raw) {
+      const handled = await handlePairingOrEmailInput(ctx, raw);
+      if (handled) return;
     }
 
-    const [bookId, msgIdStr] = parts;
-    const msgId = parseInt(msgIdStr, 10);
-    if (isNaN(msgId)) {
-      return ctx.reply('❌ Message ID must be a valid number.');
+    userSessionState.set(ctx.from.id, { action: 'awaiting_web_link' });
+    return ctx.reply(
+      `🔗 *Link Your BusiMind Web Account:*\n\n` +
+      `🆔 *Your Chat ID:* \`${ctx.from.id}\` (Tap to copy)\n\n` +
+      `To link:\n` +
+      `1️⃣ Enter \`${ctx.from.id}\` into the website modal\n` +
+      `2️⃣ Or reply with your email: \`/link your-email@gmail.com\`\n` +
+      `3️⃣ Or reply with a 6-digit code: \`/pair 123456\``,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  // 4b. /unlink command: unlinks the user's Telegram Chat ID from BusiMind web account
+  bot.command('unlink', async (ctx) => {
+    const chatIdStr = String(ctx.from?.id);
+    try {
+      const q = query(collection(db, 'users'), where('telegramChatId', '==', chatIdStr));
+      const snaps = await getDocs(q);
+      let count = 0;
+      for (const d of snaps.docs) {
+        await setDoc(doc(db, 'users', d.id), {
+          telegramChatId: null,
+          telegramUsername: null,
+          unlinkedAt: new Date().toISOString(),
+        }, { merge: true });
+        count++;
+      }
+      userSessionState.delete(ctx.from?.id || 0);
+      return ctx.reply(
+        `🔓 *Telegram Account Unlinked*\n\n` +
+        `Your Telegram Chat ID (\`${chatIdStr}\`) has been dissociated from your BusiMind web profile (${count} account${count === 1 ? '' : 's'}).\n\n` +
+        `You can connect a new account anytime with \`/pair <code>\` or by entering your Chat ID on the website.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (err: any) {
+      console.error('[unlink error]:', err);
+      return ctx.reply(`⚠️ Could not unlink account: ${err.message}`);
     }
-
-    const channelId = process.env.TELEGRAM_CHANNEL_ID;
-    if (!channelId) {
-      return ctx.reply('⚠️ Please set TELEGRAM_CHANNEL_ID in your environment variables first.');
-    }
-
-    const repliedDoc = ctx.message?.reply_to_message?.document;
-    const repliedAudio = ctx.message?.reply_to_message?.audio;
-    const fileId = repliedDoc?.file_id || repliedAudio?.file_id;
-    const rawFileName = repliedDoc?.file_name || repliedAudio?.file_name;
-    const cleanName = rawFileName ? sanitizeBookFileName(rawFileName) : undefined;
-
-    const updated = store.linkTelegramMessage(bookId, channelId, msgId, cleanName, fileId);
-    if (!updated) {
-      return ctx.reply(`❌ Book with ID \`${bookId}\` not found in database.`);
-    }
-
-    const fileNotice = fileId ? `\n📄 *Direct File Stamped:* \`${cleanName || updated.fileName || 'Attached'}\`` : '';
-    return ctx.reply(`✅ Successfully linked book *${updated.title}* to Channel \`${channelId}\` at Message ID \`${msgId}\`!${fileNotice}`, {
-      parse_mode: 'Markdown',
-    });
   });
 
   // 5. /path <goal> command
@@ -893,6 +1297,19 @@ if (bot) {
     await displayReadingList(ctx);
   });
 
+  bot.callbackQuery('menu_link_web', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    userSessionState.set(ctx.from.id, { action: 'awaiting_web_link' });
+    const text = `🔗 *Link Telegram to BusiMind Web*\n\n` +
+      `🆔 *Your Chat ID:* \`${ctx.from.id}\` (Tap to copy)\n\n` +
+      `*Options to connect:*\n` +
+      `1️⃣ Enter \`${ctx.from.id}\` on the BusiMind website modal.\n` +
+      `2️⃣ Or reply directly to this message with your account email (e.g. \`hamiltonyh727@gmail.com\`).\n` +
+      `3️⃣ Or reply with the 6-digit code displayed on the website!`;
+    const kb = new InlineKeyboard().text('🏠 Main Menu', 'menu_main');
+    await safeEditMsg(ctx, ctx.callbackQuery.message?.message_id, text, kb);
+  });
+
   bot.callbackQuery('menu_ask_ai', async (ctx) => {
     userSessionState.set(ctx.from.id, { action: 'awaiting_ask' });
     const text = `🤖 *Ask BusiMind Anything:*\n\nYou can ask:\n• _"What should I read about entrepreneurship?"_\n• _"Which book should I start with as a beginner?"_\n• _"Compare The Lean Startup and Zero to One"_\n• _"Give me a reading plan for management"_\n\nSend your question below:`;
@@ -1058,81 +1475,15 @@ if (bot) {
 
         try {
           await ctx.answerCallbackQuery({ text: 'Delivering file (2-minute window)...' });
-          const cleanFileName = sanitizeBookFileName(book.fileName, book.title, book.author);
-          const brandedCaption = generateDeliveryCaption(book.title, book.author, cleanFileName);
-
-          const deliveredMsg = await deliverRenamedBookFile(
-            ctx,
+          const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+            chatId: ctx.chat!.id,
             book,
-            cleanFileName,
-            brandedCaption,
-            channelId,
-            messageId
-          );
+            source: 'bot_card',
+          });
 
-          const quotaMsg = rate.isUnlimited
-            ? '👑 _Admin: Unlimited Access_'
-            : `📊 _Daily Requests: ${rate.used}/3 used (${rate.remaining} remaining today | Resets at 00:00 UTC in ${rate.timeUntilReset})_`;
-
-          const alertMsg = await ctx.reply(
-            `✅ *${book.title}* has been delivered above directly from the BusiMind library.\n` +
-            `📄 *File:* \`${cleanFileName}\`\n\n` +
-            `⏳ *SELF-DESTRUCT TIMER ACTIVATED (2 MINUTES)* ⏳\n` +
-            `⚠️ *Important Notice:* This book file will be *automatically deleted from this chat in exactly 2 minutes* (120 seconds)!\n\n` +
-            `📲 *HOW TO KEEP THIS FILE PERMANENTLY:*\n` +
-            `👉 *Forward the document/file above to your "Saved Messages" right now!*\n` +
-            `_Once saved in your personal Saved Messages (or forwarded to your private chat), it will remain accessible forever, even after it vanishes from this bot chat._\n\n` +
-            `${quotaMsg}`,
-            {
-              parse_mode: 'Markdown',
-              reply_markup: new InlineKeyboard()
-                .text('⭐ Save to Reading List', `add_list_${book.id}`)
-                .text('🏠 Main Menu', 'menu_main'),
-            }
-          );
-
-          // Auto-delete delivered file and notice after exactly 2 minutes (120,000 ms)
-          const TWO_MINUTES_MS = 2 * 60 * 1000;
-          setTimeout(async () => {
-            const chatId = ctx.chat!.id;
-
-            // 1. Delete delivered document / media message
-            if (deliveredMsg && deliveredMsg.message_id) {
-              try {
-                await ctx.api.deleteMessage(chatId, deliveredMsg.message_id);
-              } catch (delFileErr: any) {
-                console.warn(`[Auto-delete file msg ${deliveredMsg.message_id} error]:`, delFileErr?.message || delFileErr);
-              }
-            }
-
-            // 2. Delete the timer alert message
-            if (alertMsg && alertMsg.message_id) {
-              try {
-                await ctx.api.deleteMessage(chatId, alertMsg.message_id);
-              } catch (delAlertErr: any) {
-                console.warn(`[Auto-delete alert msg ${alertMsg.message_id} error]:`, delAlertErr?.message || delAlertErr);
-              }
-            }
-
-            // 3. Post a polite expiration confirmation in chat
-            try {
-              await ctx.api.sendMessage(
-                chatId,
-                `🗑️ *File Expired & Auto-Deleted:*\n\n` +
-                `The 2-minute temporary availability window for *${book.title}* has elapsed, and the file was removed from this chat.\n\n` +
-                `💡 _If you forwarded it to your Saved Messages, it remains safely in your personal account for continued reading!_`,
-                {
-                  parse_mode: 'Markdown',
-                  reply_markup: new InlineKeyboard()
-                    .text('📚 Browse Catalog', 'menu_categories')
-                    .text('🏠 Main Menu', 'menu_main'),
-                }
-              );
-            } catch (notifyErr: any) {
-              console.warn(`[Auto-delete expiration notice error]:`, notifyErr?.message || notifyErr);
-            }
-          }, TWO_MINUTES_MS);
-
+          if (!delRes.success) {
+            await ctx.reply(`⚠️ Delivery error: ${delRes.error || 'Failed to dispatch file'}`);
+          }
           return;
         } catch (err: any) {
           console.error('[Telegram copyMessage error]:', err);
@@ -1619,6 +1970,26 @@ if (bot) {
       if (text.startsWith('/')) return; // Handled by command dispatchers
 
       const state = userSessionState.get(ctx.from.id);
+
+      // Check for 6-digit pairing code (e.g. "492815" or "p_492815") or email address
+      const cleanCandidate = text.replace(/^p_/, '').replace(/-/g, '').trim();
+      if (/^\d{6}$/.test(cleanCandidate) || /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(text)) {
+        const handled = await handlePairingOrEmailInput(ctx, text);
+        if (handled) return;
+      }
+
+      if (state && state.action === 'awaiting_web_link') {
+        userSessionState.delete(ctx.from.id);
+        const handled = await handlePairingOrEmailInput(ctx, text);
+        if (handled) return;
+        await ctx.reply(
+          `⚠️ We could not match that input to an active pairing code or email.\n\n` +
+          `• Your Chat ID is \`${ctx.from.id}\`. You can enter it on the BusiMind website modal to link instantly!\n` +
+          `• Or make sure you send a 6-digit code (e.g. \`123456\`) or your account email address.`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
 
       // If user is responding to "What book would you like to request?"
       if (state && state.action === 'awaiting_wishlist_request') {

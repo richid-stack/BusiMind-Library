@@ -16,6 +16,7 @@ import {
 interface Props {
   books?: Book[];
   book?: Book;
+  isAdmin?: boolean;
   onOpenReader: (book: Book) => void;
   onTestDeliver: (book: Book) => void;
   onExtractRAG: (book: Book) => void;
@@ -27,6 +28,7 @@ interface Props {
 export const KindleHeroFeature: React.FC<Props> = ({
   books = [],
   book: singleBook,
+  isAdmin = false,
   onOpenReader,
   onTestDeliver,
   onExtractRAG,
@@ -200,7 +202,7 @@ export const KindleHeroFeature: React.FC<Props> = ({
               <BookOpen className="w-4 h-4" />
               <span>Read Preview</span>
             </button>
-            {activeBook.channelMessageId && (
+            {isAdmin && activeBook.channelMessageId && (
               <button
                 onClick={() => onTestDeliver(activeBook)}
                 disabled={isDelivering}
@@ -210,16 +212,28 @@ export const KindleHeroFeature: React.FC<Props> = ({
                 <span>{isDelivering ? 'Dispatching...' : 'Send to Telegram'}</span>
               </button>
             )}
-            <button
-              onClick={() => onExtractRAG(activeBook)}
-              disabled={extractingRAGId === activeBook.id}
-              className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-[#0f1111] border border-gray-300 font-semibold rounded-full text-xs flex items-center gap-2 transition-colors shadow-sm"
-            >
-              <Brain className="w-3.5 h-3.5" />
-              <span>{extractingRAGId === activeBook.id ? 'Synthesizing...' : 'Extract Models'}</span>
-            </button>
+            {!isAdmin && activeBook.channelMessageId && (
+              <button
+                onClick={() => onTestDeliver(activeBook)}
+                disabled={isDelivering}
+                className="px-4 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 font-semibold rounded-full text-xs flex items-center gap-2 transition-colors shadow-sm"
+              >
+                <Send className="w-3.5 h-3.5 text-[#229ed9]" />
+                <span>{isDelivering ? 'Connecting...' : 'Get on Telegram'}</span>
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => onExtractRAG(activeBook)}
+                disabled={extractingRAGId === activeBook.id}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-[#0f1111] border border-gray-300 font-semibold rounded-full text-xs flex items-center gap-2 transition-colors shadow-sm"
+              >
+                <Brain className="w-3.5 h-3.5" />
+                <span>{extractingRAGId === activeBook.id ? 'Synthesizing...' : 'Extract Models'}</span>
+              </button>
+            )}
 
-            {ragSuccessMsg && (
+            {isAdmin && ragSuccessMsg && (
               <span className="text-xs text-[#007600] font-bold flex items-center gap-1 animate-fadeIn">
                 ✓ {ragSuccessMsg}
               </span>

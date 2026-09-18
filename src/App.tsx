@@ -40,9 +40,11 @@ import { PrivacyPolicyModal } from './components/modals/PrivacyPolicyModal';
 import { TermsOfServiceModal } from './components/modals/TermsOfServiceModal';
 import { FaqModal } from './components/modals/FaqModal';
 import { BookRequestModal } from './components/modals/BookRequestModal';
-import { AdminAuthModal } from './components/modals/AdminAuthModal';
+import { useAuth } from './context/AuthContext';
+import { LoginScreen } from './components/LoginScreen';
+import { TelegramOnboarding } from './components/TelegramOnboarding';
 import { apiFetch } from './lib/api';
-import { initTelegramWebApp, getTelegramUser } from './lib/telegram';
+import { initTelegramWebApp, getTelegramUser, triggerHaptic } from './lib/telegram';
 import { Book } from './types';
 
 interface BotConfigStatus {
@@ -61,11 +63,10 @@ interface SystemStats {
 }
 
 export default function App() {
+  const { user, isAdmin, loading: authLoading, logout, telegramChatId } = useAuth();
   const [activeTab, setActiveTab] = useState<'catalog' | 'valuation' | 'research' | 'analytics' | 'macro' | 'simulator' | 'setup'>('catalog');
   const [status, setStatus] = useState<BotConfigStatus | null>(null);
   const [stats, setStats] = useState<SystemStats | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [catalogSearchQuery, setCatalogSearchQuery] = useState('');
 
   // Modals
@@ -73,57 +74,12 @@ export default function App() {
   const [isTermsOpen, setIsTermsOpen] = useState(false);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
   const [isBookRequestOpen, setIsBookRequestOpen] = useState(false);
-  const [isAdminAuthOpen, setIsAdminAuthOpen] = useState(false);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
+  const [hasSkippedLinking, setHasSkippedLinking] = useState(() => sessionStorage.getItem('skippedTelegram') === 'true');
 
   // Initialize Telegram WebApp SDK if running inside Telegram
   useEffect(() => {
     initTelegramWebApp();
-  }, []);
-
-  // Secret Admin access via URL query (?admin=true) or keyboard shortcut (Ctrl+Shift+A)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('admin') === 'true' || params.get('portal') === 'admin' || params.get('curator') === 'true') {
-      setIsAdminAuthOpen(true);
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-        e.preventDefault();
-        setIsAdminAuthOpen(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  // Check admin access
-  const verifyAdminAuth = async () => {
-    const savedPassword = localStorage.getItem('WEB_ADMIN_PASSWORD');
-    if (!savedPassword) {
-      setIsAdmin(false);
-      setIsAuthChecking(false);
-      return;
-    }
-
-    try {
-      const res = await apiFetch('/api/auth/verify', { method: 'POST' });
-      if (res.ok) {
-        setIsAdmin(true);
-      } else {
-        setIsAdmin(false);
-        localStorage.removeItem('WEB_ADMIN_PASSWORD');
-      }
-    } catch {
-      setIsAdmin(false);
-    } finally {
-      setIsAuthChecking(false);
-    }
-  };
-
-  useEffect(() => {
-    verifyAdminAuth();
   }, []);
 
   // Fetch metadata status
@@ -156,31 +112,92 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchStatus();
-  }, [isAdmin]);
+    if (user) {
+      fetchStatus();
+    }
+  }, [isAdmin, user]);
 
-  const handleAdminSignOut = () => {
-    localStorage.removeItem('WEB_ADMIN_PASSWORD');
-    setIsAdmin(false);
+  const handleSignOut = () => {
+    logout();
     if (activeTab === 'setup' || activeTab === 'simulator') {
       setActiveTab('catalog');
     }
   };
 
-  const handleAdminLoginSuccess = () => {
-    setIsAdmin(true);
-    fetchStatus();
-  };
-
   const handleTabSelect = (tab: typeof activeTab) => {
+    triggerHaptic('light');
     // If not admin and trying to access admin tabs, redirect to catalog
     if (!isAdmin && (tab === 'setup' || tab === 'simulator')) {
-      setIsAdminAuthOpen(true);
+      setActiveTab('catalog');
       return;
     }
     setActiveTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  if (authLoading) {
+    return (
+      <div className="flex h-screen bg-[#F8F9FA] overflow-hidden">
+        {/* Sidebar Skeleton */}
+        <div className="hidden md:flex w-64 flex-col bg-[#131921] border-r border-gray-800">
+          <div className="p-4 border-b border-gray-800 flex items-center gap-3">
+            <div className="w-8 h-8 bg-gray-800 rounded-md animate-pulse" />
+            <div className="h-5 w-24 bg-gray-800 rounded animate-pulse" />
+          </div>
+          <div className="p-4 space-y-4">
+            <div className="h-4 w-20 bg-gray-800 rounded animate-pulse mb-6" />
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center gap-3">
+                <div className="w-5 h-5 bg-gray-800 rounded animate-pulse" />
+                <div className="h-4 w-32 bg-gray-800 rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {/* Main Content Skeleton */}
+        <div className="flex-1 flex flex-col min-w-0 bg-[#F8F9FA]">
+          {/* Top Header Skeleton */}
+          <header className="h-14 bg-white border-b border-gray-200 flex items-center px-4 justify-between">
+            <div className="flex items-center gap-4 flex-1">
+              <div className="w-6 h-6 bg-gray-200 rounded animate-pulse md:hidden" />
+              <div className="h-9 max-w-md w-full bg-gray-100 rounded-md animate-pulse hidden sm:block" />
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse" />
+              <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse" />
+            </div>
+          </header>
+          
+          {/* Page Content Skeleton */}
+          <main className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+            <div className="max-w-7xl mx-auto space-y-6">
+              <div className="h-8 w-48 bg-gray-200 rounded-md animate-pulse" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => (
+                  <div key={i} className="bg-white border border-gray-100 rounded-lg h-64 animate-pulse p-4 flex flex-col justify-end">
+                    <div className="h-4 w-3/4 bg-gray-200 rounded mb-2" />
+                    <div className="h-3 w-1/2 bg-gray-100 rounded" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+  if (!telegramChatId && !hasSkippedLinking && !isAdmin) {
+    return <TelegramOnboarding onSkip={() => {
+      sessionStorage.setItem('skippedTelegram', 'true');
+      setHasSkippedLinking(true);
+    }} />;
+  }
 
   const tgUser = getTelegramUser();
 
@@ -205,16 +222,22 @@ export default function App() {
 
           {/* Delivery Location (Desktop) */}
           <div
-            onClick={() => window.open('https://t.me/BusiMind_bot', '_blank')}
+            onClick={() => {
+              if (tgUser || telegramChatId) {
+                window.open('https://t.me/BusiMind_bot', '_blank');
+              } else if (user) {
+                window.open(`https://t.me/BusiMind_bot?start=link_${user.uid}`, '_blank');
+              }
+            }}
             className="hidden lg:flex items-center gap-1.5 cursor-pointer border border-transparent hover:border-white/40 p-2 rounded-sm transition-all shrink-0"
           >
             <MapPin className="w-5 h-5 text-white mt-1" />
             <div className="flex flex-col text-white leading-tight">
               <span className="text-xs text-gray-300">
-                {tgUser ? `Deliver to ${tgUser.first_name}` : 'Deliver to'}
+                {tgUser ? `Deliver to ${tgUser.first_name}` : telegramChatId ? 'Deliver to Telegram' : 'Not Linked'}
               </span>
               <span className="text-sm font-bold flex items-center gap-1">
-                Telegram Library <ChevronDown className="w-4 h-4 text-gray-300" />
+                {(tgUser || telegramChatId) ? 'Telegram Library' : 'Link Telegram'} <ChevronDown className="w-4 h-4 text-gray-300" />
               </span>
             </div>
           </div>
@@ -251,121 +274,163 @@ export default function App() {
               </span>
             </a>
 
-            <div
-              onClick={() => setIsFaqOpen(true)}
-              className="flex items-center gap-1.5 cursor-pointer border border-transparent hover:border-white/40 p-2 rounded-sm transition-all"
-            >
-              <HelpCircle className="w-5 h-5 text-gray-300" />
-              <span className="text-sm font-bold hidden md:inline-block leading-tight">Help</span>
-            </div>
-
-            {/* Admin Curator Badge & Exit (ONLY rendered when already authenticated) */}
+            {/* Admin Curator Badge */}
             {isAdmin && (
-              <div className="flex items-center gap-1.5 ml-1 border-l border-white/20 pl-2">
-                <div className="hidden sm:flex items-center gap-1 bg-[#ffd814]/15 border border-[#ffd814]/40 text-[#ffd814] px-2.5 py-1 rounded-full text-xs font-bold">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Curator</span>
-                </div>
-                <button
-                  onClick={handleAdminSignOut}
-                  title="Exit Curator Mode"
-                  className="p-1.5 text-gray-300 hover:text-rose-300 hover:bg-white/10 rounded transition-colors text-xs flex items-center gap-1"
-                >
-                  <LogOut className="w-4 h-4 text-rose-400" />
-                  <span className="hidden xl:inline text-xs">Exit</span>
-                </button>
+              <div className="hidden sm:flex items-center gap-1 bg-[#ffd814]/15 border border-[#ffd814]/40 text-[#ffd814] px-2.5 py-1 rounded-full text-xs font-bold ml-1">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Curator</span>
               </div>
             )}
           </div>
         </div>
 
         {/* 2. SUB-NAVIGATION BAR (Amazon Department Style) */}
-        <div className="bg-[#232f3e] px-4 py-2 flex items-center gap-3 sm:gap-6 text-sm font-medium overflow-x-auto custom-scrollbar shadow-inner">
-          <button
-            onClick={() => setIsMobileDrawerOpen(true)}
-            className="flex items-center gap-1 border border-transparent hover:border-white px-2 py-1 rounded-sm shrink-0 text-white font-bold"
+        <div className="bg-[#232f3e] px-4 py-2 flex items-center gap-2 sm:gap-3 text-sm font-medium overflow-x-auto custom-scrollbar shadow-inner relative">
+          <motion.button
+            whileTap={{ scale: 0.92 }}
+            onClick={() => {
+              triggerHaptic('light');
+              setIsMobileDrawerOpen(true);
+            }}
+            className="flex items-center gap-1 border border-transparent hover:border-white/40 px-2 py-1 rounded-md shrink-0 text-white font-bold cursor-pointer transition-colors"
           >
-            <Menu className="w-5 h-5" /> All
-          </button>
+            <Menu className="w-5 h-5" />
+          </motion.button>
 
-          <button
+          <motion.button
+            whileTap={{ scale: 0.96 }}
             onClick={() => handleTabSelect('catalog')}
-            className={`border border-transparent hover:border-white px-2 py-1 rounded-sm shrink-0 flex items-center gap-1.5 transition-colors ${
-              activeTab === 'catalog' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-200'
+            className={`relative border border-transparent px-3 py-1 rounded-md shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
+              activeTab === 'catalog' ? 'text-[#f3a847] font-bold' : 'text-gray-200 hover:text-white'
             }`}
           >
-            <BookOpen className="w-4 h-4" />
-            <span>Executive Bookstore</span>
-            {(stats?.totalBooks || status?.totalBooks) ? (
-              <span className="text-[10px] bg-[#f3a847] text-[#131921] px-1.5 py-0.5 rounded-full font-bold ml-0.5">
+            {activeTab === 'catalog' && (
+              <motion.div
+                layoutId="activeSubNavIndicator"
+                className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+              />
+            )}
+            <BookOpen className="w-4 h-4 relative z-10" />
+            <span className="relative z-10">{isAdmin ? 'Executive Bookstore' : 'BusiMind Library'}</span>
+            {((stats?.totalBooks || status?.totalBooks) && isAdmin) ? (
+              <span className="relative z-10 text-[10px] bg-[#f3a847] text-[#131921] px-1.5 py-0.5 rounded-full font-bold ml-0.5">
                 {stats?.totalBooks || status?.totalBooks}
               </span>
             ) : null}
-          </button>
-
-          <button
-            onClick={() => handleTabSelect('valuation')}
-            className={`border border-transparent hover:border-white px-2 py-1 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors ${
-              activeTab === 'valuation' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-200'
-            }`}
-          >
-            <LineChart className="w-4 h-4 text-emerald-400" />
-            <span>Financial Terminal (DCF)</span>
-          </button>
-
-          <button
-            onClick={() => handleTabSelect('research')}
-            className={`border border-transparent hover:border-white px-2 py-1 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors ${
-              activeTab === 'research' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-200'
-            }`}
-          >
-            <GraduationCap className="w-4 h-4 text-indigo-400" />
-            <span>Academic Library</span>
-          </button>
-
-          <button
-            onClick={() => handleTabSelect('analytics')}
-            className={`border border-transparent hover:border-white px-2 py-1 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors ${
-              activeTab === 'analytics' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-200'
-            }`}
-          >
-            <PieChart className="w-4 h-4 text-purple-400" />
-            <span>Portfolio & Risk</span>
-          </button>
-
-          <button
-            onClick={() => handleTabSelect('macro')}
-            className={`border border-transparent hover:border-white px-2 py-1 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors ${
-              activeTab === 'macro' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-200'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4 text-amber-400" />
-            <span>Macro & BoG Benchmarks</span>
-          </button>
+          </motion.button>
 
           {/* Admin-Only Tabs */}
           {isAdmin && (
             <>
-              <div className="h-4 w-px bg-gray-600 shrink-0 mx-2" />
-              <button
-                onClick={() => handleTabSelect('setup')}
-                className={`border border-transparent hover:border-white px-2 py-1 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors ${
-                  activeTab === 'setup' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-300'
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={() => handleTabSelect('valuation')}
+                className={`relative border border-transparent px-3 py-1 rounded-md flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                  activeTab === 'valuation' ? 'text-[#f3a847] font-bold' : 'text-gray-200 hover:text-white'
                 }`}
               >
-                <Settings className="w-4 h-4 text-amber-300" />
-                <span>Channel Ingestion</span>
-              </button>
+                {activeTab === 'valuation' && (
+                  <motion.div
+                    layoutId="activeSubNavIndicator"
+                    className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <LineChart className="w-4 h-4 text-emerald-400 relative z-10" />
+                <span className="relative z-10">Financial Terminal (DCF)</span>
+              </motion.button>
 
-              <button
-                onClick={() => handleTabSelect('simulator')}
-                className={`border border-transparent hover:border-white px-2 py-1 rounded-sm flex items-center gap-1.5 shrink-0 transition-colors ${
-                  activeTab === 'simulator' ? 'text-[#f3a847] font-bold bg-white/10' : 'text-gray-300'
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={() => handleTabSelect('research')}
+                className={`relative border border-transparent px-3 py-1 rounded-md flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                  activeTab === 'research' ? 'text-[#f3a847] font-bold' : 'text-gray-200 hover:text-white'
                 }`}
               >
-                <Terminal className="w-4 h-4 text-amber-300" />
-                <span>Telegram Simulator</span>
-              </button>
+                {activeTab === 'research' && (
+                  <motion.div
+                    layoutId="activeSubNavIndicator"
+                    className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <GraduationCap className="w-4 h-4 text-indigo-400 relative z-10" />
+                <span className="relative z-10">Academic Library</span>
+              </motion.button>
+
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={() => handleTabSelect('analytics')}
+                className={`relative border border-transparent px-3 py-1 rounded-md flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                  activeTab === 'analytics' ? 'text-[#f3a847] font-bold' : 'text-gray-200 hover:text-white'
+                }`}
+              >
+                {activeTab === 'analytics' && (
+                  <motion.div
+                    layoutId="activeSubNavIndicator"
+                    className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <PieChart className="w-4 h-4 text-purple-400 relative z-10" />
+                <span className="relative z-10">Portfolio & Risk</span>
+              </motion.button>
+
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={() => handleTabSelect('macro')}
+                className={`relative border border-transparent px-3 py-1 rounded-md flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                  activeTab === 'macro' ? 'text-[#f3a847] font-bold' : 'text-gray-200 hover:text-white'
+                }`}
+              >
+                {activeTab === 'macro' && (
+                  <motion.div
+                    layoutId="activeSubNavIndicator"
+                    className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <TrendingUp className="w-4 h-4 text-amber-400 relative z-10" />
+                <span className="relative z-10">Macro & BoG Benchmarks</span>
+              </motion.button>
+
+              <div className="h-4 w-px bg-gray-600 shrink-0 mx-1" />
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={() => handleTabSelect('setup')}
+                className={`relative border border-transparent px-3 py-1 rounded-md flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                  activeTab === 'setup' ? 'text-[#f3a847] font-bold' : 'text-gray-300 hover:text-white'
+                }`}
+              >
+                {activeTab === 'setup' && (
+                  <motion.div
+                    layoutId="activeSubNavIndicator"
+                    className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <Settings className="w-4 h-4 text-amber-300 relative z-10" />
+                <span className="relative z-10">Channel Ingestion</span>
+              </motion.button>
+
+              <motion.button
+                whileTap={{ scale: 0.96 }}
+                onClick={() => handleTabSelect('simulator')}
+                className={`relative border border-transparent px-3 py-1 rounded-md flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                  activeTab === 'simulator' ? 'text-[#f3a847] font-bold' : 'text-gray-300 hover:text-white'
+                }`}
+              >
+                {activeTab === 'simulator' && (
+                  <motion.div
+                    layoutId="activeSubNavIndicator"
+                    className="absolute inset-0 bg-white/10 rounded-md border border-white/20"
+                    transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                  />
+                )}
+                <Terminal className="w-4 h-4 text-amber-300 relative z-10" />
+                <span className="relative z-10">Telegram Simulator</span>
+              </motion.button>
             </>
           )}
         </div>
@@ -419,10 +484,10 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'valuation' && <ValuationLab />}
-              {activeTab === 'research' && <AcademicLibraryView />}
-              {activeTab === 'analytics' && <AnalyticsView stats={stats} />}
-              {activeTab === 'macro' && <MacroIntelligenceView />}
+              {activeTab === 'valuation' && isAdmin && <ValuationLab />}
+              {activeTab === 'research' && isAdmin && <AcademicLibraryView />}
+              {activeTab === 'analytics' && isAdmin && <AnalyticsView stats={stats} />}
+              {activeTab === 'macro' && isAdmin && <MacroIntelligenceView />}
 
               {/* Locked Admin Routes */}
               {activeTab === 'setup' && isAdmin && (
@@ -565,10 +630,10 @@ export default function App() {
                   </li>
                   <li>
                     <button
-                      onClick={handleAdminSignOut}
+                      onClick={handleSignOut}
                       className="hover:text-rose-400 hover:underline transition-colors text-rose-400 font-bold"
                     >
-                      Sign Out of Admin Mode
+                      Sign Out (Admin)
                     </button>
                   </li>
                 </ul>
@@ -609,6 +674,14 @@ export default function App() {
                       Educational Fair Use
                     </button>
                   </li>
+                  <li>
+                    <button
+                      onClick={handleSignOut}
+                      className="hover:text-rose-400 hover:underline transition-colors text-rose-400 font-bold"
+                    >
+                      Sign Out
+                    </button>
+                  </li>
                 </ul>
               </>
             )}
@@ -640,7 +713,7 @@ export default function App() {
             </button>
           </div>
           <div
-            onClick={() => setIsAdminAuthOpen(true)}
+            onClick={() => setIsPrivacyOpen(true)}
             className="text-xs text-gray-500 max-w-xl cursor-default select-none hover:text-gray-400 transition-colors mt-2"
             title="BusiMind Institutional Repository"
           >
@@ -658,19 +731,14 @@ export default function App() {
         onOpenBookRequest={() => setIsBookRequestOpen(true)}
       />
       <BookRequestModal isOpen={isBookRequestOpen} onClose={() => setIsBookRequestOpen(false)} />
-      <AdminAuthModal
-        isOpen={isAdminAuthOpen}
-        onClose={() => setIsAdminAuthOpen(false)}
-        onSuccess={handleAdminLoginSuccess}
-      />
       <MobileDrawer
         isOpen={isMobileDrawerOpen}
         onClose={() => setIsMobileDrawerOpen(false)}
         activeTab={activeTab}
         onSelectTab={handleTabSelect}
         isAdmin={isAdmin}
-        onOpenAdminAuth={() => setIsAdminAuthOpen(true)}
-        onAdminSignOut={handleAdminSignOut}
+        onOpenAdminAuth={() => {}} // Deprecated
+        onAdminSignOut={handleSignOut}
         onOpenPrivacy={() => setIsPrivacyOpen(true)}
         onOpenTerms={() => setIsTermsOpen(true)}
         onOpenFaq={() => setIsFaqOpen(true)}

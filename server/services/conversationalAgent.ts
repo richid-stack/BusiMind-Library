@@ -104,6 +104,10 @@ export async function evaluateIntentWithLLM(query: string): Promise<IntentEvalua
 
   const ai = getGenAI();
 
+  if (!ai && !process.env.GROQ_API_KEY) {
+    throw new Error('AI client is null and no Groq key is provided');
+  }
+
   const prompt = `You are BusiMind AI, an elite executive business library curator and knowledge assistant.
 Analyze this user query: "${cleanQ}"
 

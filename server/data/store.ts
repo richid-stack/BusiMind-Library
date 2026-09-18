@@ -2,6 +2,7 @@ import { collection, doc, setDoc, deleteDoc, getDocs, onSnapshot } from 'firebas
 import { db } from './firestoreConfig';
 import { Book, ReadingListItem, SearchLog, SystemStats, BookRequest } from '../../src/types';
 import { INITIAL_BOOKS } from './initialBooks';
+import { getCanonicalPublicationYear } from '../services/canonicalBookDates';
 
 
 interface StoreSchema {
@@ -64,7 +65,15 @@ class BusiMindStore {
     try {
       const booksSnap = await getDocs(collection(db, 'books'));
       if (booksSnap.docs.length > 0) {
-        this.memoryStore.books = booksSnap.docs.map(d => d.data() as any);
+        this.memoryStore.books = booksSnap.docs.map(d => {
+          const b = d.data() as any;
+          if (!b.publicationYear || b.publicationYear >= 2025) {
+            const canonical = getCanonicalPublicationYear(b.title, b.author);
+            if (canonical) b.publicationYear = canonical;
+            else if (b.publicationYear === 2026) delete b.publicationYear;
+          }
+          return b;
+        });
       }
       
       const rlSnap = await getDocs(collection(db, 'readingLists'));
@@ -87,9 +96,20 @@ class BusiMindStore {
       this.isInitialized = true;
       console.log(`[BusiMindStore] Firestore synced successfully. Total books in catalog: ${this.memoryStore.books.length}`);
       
+      // Auto-repair known books with accurate publication years in background
+      this.repairBookDates().catch((e) => console.error('[BusiMindStore] repairBookDates error:', e));
+
       // Setup realtime listeners for multi-instance sync
       onSnapshot(collection(db, 'books'), (snap) => {
-         this.memoryStore.books = snap.docs.map(d => d.data() as any);
+         this.memoryStore.books = snap.docs.map(d => {
+           const b = d.data() as any;
+           if (!b.publicationYear || b.publicationYear >= 2025) {
+             const canonical = getCanonicalPublicationYear(b.title, b.author);
+             if (canonical) b.publicationYear = canonical;
+             else if (b.publicationYear === 2026) delete b.publicationYear;
+           }
+           return b;
+         });
       });
       onSnapshot(collection(db, 'bookRequests'), (snap) => {
          this.memoryStore.bookRequests = snap.docs.map(d => d.data() as any);
@@ -106,6 +126,33 @@ class BusiMindStore {
 
   private saveToDisk(store: StoreSchema) {
     // Legacy disk save removed in favor of direct Firestore updates on mutation
+  }
+
+  public async repairBookDates(): Promise<{ repaired: number; total: number }> {
+    let repaired = 0;
+    for (const book of this.memoryStore.books) {
+      if (!book.publicationYear || book.publicationYear >= 2025) {
+        const canonical = getCanonicalPublicationYear(book.title, book.author);
+        if (canonical) {
+          book.publicationYear = canonical;
+          repaired++;
+          try {
+            await setDoc(doc(db, 'books', book.id), sanitizeForFirestore({ publicationYear: canonical }), { merge: true });
+          } catch (e) {
+            // Ignore minor firestore write errors
+          }
+        } else if (book.publicationYear === 2026) {
+          delete (book as any).publicationYear;
+          try {
+            await setDoc(doc(db, 'books', book.id), { publicationYear: null }, { merge: true });
+          } catch (e) {}
+        }
+      }
+    }
+    if (repaired > 0) {
+      console.log(`[BusiMindStore] Repaired ${repaired} books with authentic publication years.`);
+    }
+    return { repaired, total: this.memoryStore.books.length };
   }
 
   // --- BOOK CATALOG METHODS ---

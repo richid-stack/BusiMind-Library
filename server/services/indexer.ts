@@ -343,7 +343,7 @@ Return pure JSON.`;
     bestFor: 'Entrepreneurs, founders, and institutional operators.',
     difficulty: 'intermediate',
     tags: ['business', 'strategy', 'reference'],
-    publicationYear: resolvedMeta.publishedYear || new Date().getFullYear(),
+    publicationYear: resolvedMeta.publishedYear || undefined,
     coverImageUrl,
     ratingScore: 4.8,
     isFeatured: false,

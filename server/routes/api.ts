@@ -4,6 +4,7 @@ import { bot, isBotTokenConfigured, getBookHelpExplanation, getBookKeyTakeaways 
 import { isGeminiAvailable, searchBooksWithAI, generateReadingPath, askAboutBook, resolveBookOrIntent } from '../gemini';
 import { sanitizeBookFileName, generateDeliveryCaption } from '../services/fileSanitizer';
 import { enrichCatalog, enrichSingleBook } from '../services/catalogEnricher';
+import { getCanonicalPublicationYear } from '../services/canonicalBookDates';
 import { Book } from '../../src/types';
 import { marketDataService } from '../services/marketData';
 import { valuationEngine } from '../services/valuationEngine';
@@ -15,6 +16,8 @@ import { macroIntelligenceEngine } from '../services/macroIntelligenceEngine';
 import { comparisonScreeningEngine } from '../services/comparisonScreeningEngine';
 import { technicalAnalysisEngine } from '../services/technicalAnalysisEngine';
 import { academicResearchService } from '../services/academicResearchService';
+import { pairingStore } from '../data/pairingStore';
+import { autoDeleteService } from '../services/autoDeleteService';
 import {
   handleUserMessage,
   handleConfirmWishlistCandidate,
@@ -332,7 +335,7 @@ apiRouter.post('/books', requireAuth, (req: Request, res: Response) => {
     bestFor: bestFor || 'General business readers.',
     difficulty: difficulty || 'beginner',
     tags: Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',').map((t: string) => t.trim()) : [],
-    publicationYear: Number(publicationYear) || new Date().getFullYear(),
+    publicationYear: Number(publicationYear) || getCanonicalPublicationYear(title, author) || undefined,
     ratingScore: Number(ratingScore) || 4.5,
     isFeatured: Boolean(isFeatured),
     distributionType: distributionType || 'external_only',
@@ -427,6 +430,17 @@ apiRouter.post('/catalog/enrich', requireAuth, async (req: Request, res: Respons
   }
 });
 
+// POST /api/catalog/repair-dates (Repairs 2026/fake dates with canonical authentic publication years)
+apiRouter.post('/catalog/repair-dates', async (req: Request, res: Response) => {
+  try {
+    const result = await store.repairBookDates();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Repair Dates Error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to repair dates' });
+  }
+});
+
 // GET /api/catalog/enrich/preview (Admin Only)
 apiRouter.get('/catalog/enrich/preview', requireAuth, (req: Request, res: Response) => {
   const books = store.getAllBooks();
@@ -454,46 +468,268 @@ apiRouter.post('/books/:id/deliver', async (req: Request, res: Response) => {
     res.status(404).json({ error: 'Book not found' });
     return;
   }
-  const { chatId } = req.body;
+  const { chatId, uid } = req.body;
+  let effectiveChatId = chatId;
+
+  if (!effectiveChatId && uid) {
+    try {
+      const { db } = await import('../data/firestoreConfig');
+      const { doc, getDoc } = await import('firebase/firestore');
+      const userSnap = await getDoc(doc(db, 'users', uid));
+      if (userSnap.exists()) {
+        effectiveChatId = userSnap.data()?.telegramChatId;
+      }
+    } catch (e: any) {
+      console.warn('[Deliver user lookup error]:', e?.message || e);
+    }
+  }
+
   const channelId = book.channelChatId || process.env.TELEGRAM_CHANNEL_ID;
   const messageId = book.channelMessageId;
 
   // 1. Direct Telegram delivery if user provided their chatId or is in Telegram WebApp
-  if (chatId && bot && channelId && messageId) {
-    try {
-      const cleanFileName = sanitizeBookFileName(book.fileName, book.title, book.author);
-      const brandedCaption = generateDeliveryCaption(book.title, book.author, cleanFileName);
+  if (effectiveChatId && bot && channelId && messageId) {
+    const cleanChatId = String(effectiveChatId).trim();
+    // Dual rate limit check: Telegram Chat ID and Web User ID
+    const chatUsage = store.getDailyUsage(cleanChatId);
+    const uidUsage = uid ? store.getDailyUsage(uid) : null;
 
-      const result = await bot.api.copyMessage(Number(chatId), channelId, messageId, {
-        caption: brandedCaption,
-        parse_mode: 'Markdown',
-      });
-      res.json({
-        success: true,
-        delivered: true,
-        method: 'telegram_direct',
-        deliveredMessageId: result.message_id,
-        message: `"${book.title}" delivered directly to your Telegram chat!`
+    if (!chatUsage.isUnlimited && (chatUsage.remaining <= 0 || (uidUsage && !uidUsage.isUnlimited && uidUsage.remaining <= 0))) {
+      res.status(429).json({
+        success: false,
+        error: `Daily limit reached (3/3 books). Resets at 00:00 UTC (in ${chatUsage.timeUntilReset}).`,
+        limitReached: true,
+        remaining: 0,
+        timeUntilReset: chatUsage.timeUntilReset,
       });
       return;
+    }
+
+    try {
+      const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+        chatId: Number(cleanChatId),
+        book,
+        source: 'web_deliver',
+      });
+      if (delRes.success) {
+        // Enforce quota consumption across both Telegram recipient and Web session
+        store.incrementDailyUsage(cleanChatId);
+        if (uid) store.incrementDailyUsage(uid);
+
+        const updatedUsage = store.getDailyUsage(cleanChatId);
+        res.json({
+          success: true,
+          delivered: true,
+          method: 'telegram_direct',
+          deliveredMessageId: delRes.deliveredMessageId,
+          remainingToday: updatedUsage.remaining,
+          message: `"${book.title}" delivered directly to your Telegram chat with 2-minute auto-destruction window!`
+        });
+        return;
+      }
     } catch (err: any) {
-      console.warn('[Public deliver copyMessage error, fallback to deep-link]:', err.message);
+      console.warn('[Public deliver autoDelete error, fallback to deep-link]:', err.message);
     }
   }
 
-  // 2. Return bot direct deep link
+  // 2. Return bot direct deep link with short pairing code (strictly under 64 chars)
   const botUser = process.env.TELEGRAM_BOT_USERNAME || 'BusiMind_bot';
+  const pairingCode = uid ? pairingStore.createPairing(uid, book.id) : null;
+  const startPayload = pairingCode ? `p_${pairingCode}` : `book_${book.id}`;
   res.json({
     success: true,
     delivered: false,
     method: 'deep_link',
     botUsername: botUser,
-    deepLink: `https://t.me/${botUser}?start=book_${book.id}`,
-    message: `Click to receive "${book.title}" directly via the BusiMind Telegram Bot!`
+    pairingCode,
+    deepLink: `https://t.me/${botUser}?start=${startPayload}`,
+    message: `Connect your Telegram to receive "${book.title}" instantly!`
   });
 });
 
-// POST /api/books/:id/test-deliver (Admin Only)
+// POST /api/user/generate-pairing-code
+apiRouter.post('/user/generate-pairing-code', (req: Request, res: Response) => {
+  const { uid, bookId } = req.body;
+  if (!uid) {
+    res.status(400).json({ error: 'uid is required' });
+    return;
+  }
+  const code = pairingStore.createPairing(uid, bookId);
+  const botUser = process.env.TELEGRAM_BOT_USERNAME || 'BusiMind_bot';
+  res.json({
+    success: true,
+    code,
+    botUsername: botUser,
+    deepLink: `https://t.me/${botUser}?start=p_${code}`,
+    expiresIn: 1200,
+  });
+});
+
+// POST /api/user/link-telegram
+apiRouter.post('/user/link-telegram', async (req: Request, res: Response) => {
+  const { uid, telegramChatId, telegramUsername, bookIdToDeliver } = req.body;
+  if (!uid || !telegramChatId) {
+    res.status(400).json({ error: 'uid and telegramChatId are required' });
+    return;
+  }
+
+  const cleanChatId = String(telegramChatId).trim();
+  const cleanUsername = telegramUsername ? String(telegramUsername).replace(/^@/, '').trim() : null;
+
+  try {
+    const { db } = await import('../data/firestoreConfig');
+    const { doc, setDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+
+    // 1. Enforce strict 1-to-1 mapping: Unlink any other user accounts currently holding this Telegram Chat ID
+    try {
+      const usersRef = collection(db, 'users');
+      const conflictQuery = query(usersRef, where('telegramChatId', '==', cleanChatId));
+      const conflictSnap = await getDocs(conflictQuery);
+      for (const conflictingDoc of conflictSnap.docs) {
+        if (conflictingDoc.id !== uid) {
+          console.log(`[link-telegram] Unlinking duplicate Telegram account from previous user ${conflictingDoc.id}`);
+          await setDoc(conflictingDoc.ref, {
+            telegramChatId: null,
+            telegramUsername: null,
+            unlinkedAt: new Date().toISOString(),
+            unlinkReason: 'relinked_to_another_account',
+          }, { merge: true });
+        }
+      }
+    } catch (unifyErr: any) {
+      console.warn('[link-telegram 1-to-1 unification check error]:', unifyErr?.message || unifyErr);
+    }
+
+    // 2. Bind to current user
+    await setDoc(doc(db, 'users', uid), {
+      telegramChatId: cleanChatId,
+      telegramUsername: cleanUsername,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    // Send confirmation message into the Telegram chat so the user immediately sees it worked
+    if (bot) {
+      try {
+        await bot.api.sendMessage(
+          Number(cleanChatId),
+          `✅ *BusiMind Account Connected!*\n\n` +
+          `Your Telegram has been successfully linked to your BusiMind Web session. ` +
+          `Any titles you request on the website will now be delivered straight here!`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (notifyErr: any) {
+        console.warn('[link-telegram notify error]:', notifyErr?.message || notifyErr);
+      }
+    }
+
+    let deliveryResult: any = null;
+    if (bookIdToDeliver && bot) {
+      const book = store.getBookById(bookIdToDeliver);
+      if (book) {
+        // Enforce quota on linking delivery
+        const chatUsage = store.getDailyUsage(cleanChatId);
+        const uidUsage = store.getDailyUsage(uid);
+
+        if (!chatUsage.isUnlimited && (chatUsage.remaining <= 0 || (!uidUsage.isUnlimited && uidUsage.remaining <= 0))) {
+          deliveryResult = {
+            success: false,
+            error: `Daily limit reached (3/3 books). Resets at 00:00 UTC (in ${chatUsage.timeUntilReset}).`,
+            limitReached: true,
+            timeUntilReset: chatUsage.timeUntilReset,
+          };
+        } else {
+          try {
+            const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+              chatId: Number(cleanChatId),
+              book,
+              source: 'link_deliver',
+            });
+            if (delRes.success) {
+              store.incrementDailyUsage(cleanChatId);
+              store.incrementDailyUsage(uid);
+            }
+            deliveryResult = delRes;
+          } catch (copyErr: any) {
+            console.warn('[link-telegram deliver error]:', copyErr?.message || copyErr);
+            deliveryResult = { success: false, error: copyErr?.message };
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      telegramChatId: cleanChatId,
+      telegramUsername: cleanUsername,
+      delivery: deliveryResult,
+      message: 'Telegram account successfully linked!'
+    });
+  } catch (err: any) {
+    console.error('[link-telegram error]:', err);
+    res.status(500).json({ error: err?.message || 'Failed to link account' });
+  }
+});
+
+// POST /api/user/unlink-telegram - Unlink Telegram Chat ID from User Profile
+apiRouter.post('/user/unlink-telegram', async (req: Request, res: Response) => {
+  const { uid, email, chatId } = req.body;
+  if (!uid && !email && !chatId) {
+    res.status(400).json({ error: 'uid, email, or chatId is required' });
+    return;
+  }
+  try {
+    const { doc, setDoc, collection, query, where, getDocs } = await import('firebase/firestore');
+    const { db } = await import('../data/firestoreConfig');
+
+    let unlinkedCount = 0;
+
+    if (uid) {
+      await setDoc(doc(db, 'users', uid), {
+        telegramChatId: null,
+        telegramUsername: null,
+        unlinkedAt: new Date().toISOString(),
+      }, { merge: true });
+      unlinkedCount++;
+    }
+
+    if (email) {
+      const q = query(collection(db, 'users'), where('email', '==', email.toLowerCase().trim()));
+      const snaps = await getDocs(q);
+      for (const d of snaps.docs) {
+        await setDoc(doc(db, 'users', d.id), {
+          telegramChatId: null,
+          telegramUsername: null,
+          unlinkedAt: new Date().toISOString(),
+        }, { merge: true });
+        unlinkedCount++;
+      }
+    }
+
+    if (chatId) {
+      const q = query(collection(db, 'users'), where('telegramChatId', '==', String(chatId).trim()));
+      const snaps = await getDocs(q);
+      for (const d of snaps.docs) {
+        await setDoc(doc(db, 'users', d.id), {
+          telegramChatId: null,
+          telegramUsername: null,
+          unlinkedAt: new Date().toISOString(),
+        }, { merge: true });
+        unlinkedCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      unlinkedCount,
+      message: 'Telegram account unlinked successfully.'
+    });
+  } catch (err: any) {
+    console.error('[unlink-telegram error]:', err);
+    res.status(500).json({ error: err?.message || 'Failed to unlink Telegram' });
+  }
+});
+
+// POST /api/books/:id/test-deliver (Admin & Testing Delivery)
 apiRouter.post('/books/:id/test-deliver', requireAuth, async (req: Request, res: Response) => {
   const book = store.getBookById(req.params.id);
   if (!book) {
@@ -502,7 +738,9 @@ apiRouter.post('/books/:id/test-deliver', requireAuth, async (req: Request, res:
   }
   const channelId = book.channelChatId || process.env.TELEGRAM_CHANNEL_ID;
   const messageId = book.channelMessageId;
-  const adminId = process.env.ADMIN_TELEGRAM_ID ? Number(process.env.ADMIN_TELEGRAM_ID) : null;
+  const targetChatId = req.body.chatId
+    ? Number(req.body.chatId)
+    : (process.env.ADMIN_TELEGRAM_ID ? Number(process.env.ADMIN_TELEGRAM_ID) : null);
 
   if (!bot) {
     res.status(400).json({ error: 'Bot is not active' });
@@ -512,20 +750,29 @@ apiRouter.post('/books/:id/test-deliver', requireAuth, async (req: Request, res:
     res.status(400).json({ error: 'This book does not have a channel message ID linked yet.' });
     return;
   }
-  if (!adminId) {
-    res.status(400).json({ error: 'ADMIN_TELEGRAM_ID is not configured.' });
+  if (!targetChatId) {
+    res.status(400).json({ error: 'Telegram Chat ID is not configured.' });
     return;
   }
 
   try {
-    const cleanFileName = sanitizeBookFileName(book.fileName, book.title, book.author);
-    const brandedCaption = generateDeliveryCaption(book.title, book.author, cleanFileName);
-
-    const result = await bot.api.copyMessage(adminId, channelId, messageId, {
-      caption: brandedCaption,
-      parse_mode: 'Markdown',
+    const delRes = await autoDeleteService.deliverBookWithAutoDelete({
+      chatId: targetChatId,
+      book,
+      source: 'test_deliver',
     });
-    res.json({ success: true, deliveredMessageId: result.message_id, fileName: cleanFileName });
+
+    if (delRes.success) {
+      res.json({
+        success: true,
+        deliveredMessageId: delRes.deliveredMessageId,
+        message: `Delivered "${book.title}" to Telegram (with 2-minute auto-destruction window).`,
+      });
+      return;
+    } else {
+      res.status(500).json({ error: delRes.error || 'Failed to deliver message' });
+      return;
+    }
   } catch (err: any) {
     console.error('[test-deliver error]:', err);
     res.status(500).json({ error: err.message || 'Failed to deliver message from channel' });

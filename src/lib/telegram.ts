@@ -86,8 +86,19 @@ export function triggerHaptic(style: 'light' | 'medium' | 'heavy' = 'light') {
   if (tg?.HapticFeedback) {
     try {
       tg.HapticFeedback.impactOccurred(style);
+      return;
     } catch (e) {
       // safe fallback
+    }
+  }
+
+  // Fallback for standard mobile browsers
+  if (typeof window !== 'undefined' && 'navigator' in window && typeof navigator.vibrate === 'function') {
+    try {
+      const duration = style === 'light' ? 8 : style === 'medium' ? 16 : 28;
+      navigator.vibrate(duration);
+    } catch (e) {
+      // ignore
     }
   }
 }

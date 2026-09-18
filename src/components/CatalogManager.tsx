@@ -1,5 +1,6 @@
 import { apiFetch } from '../lib/api';
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Book, DistributionType, BookRequest } from '../types';
 import {
   BookOpen,
@@ -33,7 +34,9 @@ import { KindleHeroFeature } from './bookstore/KindleHeroFeature';
 import { BookstoreShelves } from './bookstore/BookstoreShelves';
 import { KindleBookCard } from './bookstore/KindleBookCard';
 import { KindleReaderModal } from './bookstore/KindleReaderModal';
+import { TelegramConnectModal } from './modals/TelegramConnectModal';
 import { getTelegramUser, triggerHaptic } from '../lib/telegram';
+import { useAuth } from '../context/AuthContext';
 import {
   HeroFeatureSkeleton,
   BookstoreShelvesSkeleton,
@@ -58,6 +61,7 @@ export const CatalogManager: React.FC<Props> = ({
   isAdmin = false,
   externalSearchQuery,
 }) => {
+  const { telegramChatId, user } = useAuth();
   const { startLoading, stopLoading } = useLoading();
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +125,7 @@ export const CatalogManager: React.FC<Props> = ({
 
   // Add Book Modal State
   const [isAdding, setIsAdding] = useState(false);
+  const [connectModalBook, setConnectModalBook] = useState<Book | null>(null);
   const [newBook, setNewBook] = useState({
     title: '',
     author: '',
@@ -151,10 +156,15 @@ export const CatalogManager: React.FC<Props> = ({
     startLoading('Loading executive bookstore...');
     try {
       const res = await apiFetch('/api/books');
-      const data = await res.json();
-      setBooks(data);
-      if (data.length > 0 && !quickLinkBookId) {
-        setQuickLinkBookId(data[0].id);
+      if (res.ok) {
+        const data = await res.json();
+        const booksArray = Array.isArray(data) ? data : [];
+        setBooks(booksArray);
+        if (booksArray.length > 0 && !quickLinkBookId) {
+          setQuickLinkBookId(booksArray[0].id);
+        }
+      } else {
+        throw new Error(`Server returned ${res.status}`);
       }
     } catch (err) {
       console.error('Failed to fetch books', err);
@@ -166,16 +176,18 @@ export const CatalogManager: React.FC<Props> = ({
 
   const fetchRequests = async () => {
     setRequestsLoading(true);
-    startLoading('Refreshing book requests...');
     try {
       const res = await apiFetch('/api/requests');
-      const data = await res.json();
-      setRequests(data);
+      if (res.ok) {
+        const data = await res.json();
+        setRequests(Array.isArray(data) ? data : []);
+      } else {
+        throw new Error(`Server returned ${res.status}`);
+      }
     } catch (err) {
       console.error('Failed to fetch book requests', err);
     } finally {
       setRequestsLoading(false);
-      stopLoading();
     }
   };
 
@@ -309,13 +321,20 @@ export const CatalogManager: React.FC<Props> = ({
     setDeliveryResult(null);
 
     const tgUser = getTelegramUser();
+    const effectiveChatId = tgUser?.id || telegramChatId;
     const endpoint = isAdmin ? `/api/books/${book.id}/test-deliver` : `/api/books/${book.id}/deliver`;
+
+    if (!effectiveChatId && !isAdmin) {
+      setConnectModalBook(book);
+      setDeliveringBookId(null);
+      return;
+    }
 
     try {
       const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: tgUser?.id }),
+        body: JSON.stringify({ chatId: effectiveChatId, uid: user?.uid }),
       });
       const data = await res.json();
 
@@ -448,70 +467,98 @@ export const CatalogManager: React.FC<Props> = ({
       {/* SUB-TABS (Admin Only) */}
       {isAdmin && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-4">
-          <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-gray-200 text-sm shadow-sm overflow-x-auto">
-            <button
-              onClick={() => setActiveSubTab('catalog')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all whitespace-nowrap ${
-                activeSubTab === 'catalog'
-                  ? 'bg-[#131921] text-white font-bold shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-gray-200 text-sm shadow-sm overflow-x-auto">
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveSubTab('catalog');
+              }}
+              className={`relative flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'catalog' ? 'text-white font-bold' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <BookOpen className="w-4 h-4" />
-              <span>Storefront Catalog</span>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+              {activeSubTab === 'catalog' && (
+                <motion.div
+                  layoutId="activeSubTabIndicator"
+                  className="absolute inset-0 bg-[#131921] rounded-lg shadow-sm"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <BookOpen className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Storefront Catalog</span>
+              <span className={`relative z-10 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                 activeSubTab === 'catalog' ? 'bg-[#f3a847] text-slate-950' : 'bg-gray-100 text-gray-700'
               }`}>
                 {books.length}
               </span>
-            </button>
+            </motion.button>
 
-            <button
-              onClick={() => setActiveSubTab('requests')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all whitespace-nowrap ${
-                activeSubTab === 'requests'
-                  ? 'bg-[#131921] text-white font-bold shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveSubTab('requests');
+              }}
+              className={`relative flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'requests' ? 'text-white font-bold' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <ClipboardList className="w-4 h-4" />
-              <span>User Requests Queue</span>
+              {activeSubTab === 'requests' && (
+                <motion.div
+                  layoutId="activeSubTabIndicator"
+                  className="absolute inset-0 bg-[#131921] rounded-lg shadow-sm"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <ClipboardList className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">User Requests Queue</span>
               {requests.filter((r) => r.status === 'pending').length > 0 ? (
-                <span className="bg-[#c45500] text-white px-2.5 py-0.5 rounded-full text-xs font-bold">
+                <span className="relative z-10 bg-[#c45500] text-white px-2.5 py-0.5 rounded-full text-xs font-bold">
                   {requests.filter((r) => r.status === 'pending').length} pending
                 </span>
               ) : (
-                <span className="bg-gray-100 text-gray-700 px-2.5 py-0.5 rounded-full text-xs">
+                <span className="relative z-10 bg-gray-100 text-gray-700 px-2.5 py-0.5 rounded-full text-xs">
                   {requests.length}
                 </span>
               )}
-            </button>
+            </motion.button>
 
-            <button
-              onClick={() => setActiveSubTab('linker')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all whitespace-nowrap ${
-                activeSubTab === 'linker'
-                  ? 'bg-[#131921] text-white font-bold shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+            <motion.button
+              whileTap={{ scale: 0.96 }}
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveSubTab('linker');
+              }}
+              className={`relative flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'linker' ? 'text-white font-bold' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <Link2 className="w-4 h-4" />
-              <span>Channel File Linker</span>
-              <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-[11px]">
+              {activeSubTab === 'linker' && (
+                <motion.div
+                  layoutId="activeSubTabIndicator"
+                  className="absolute inset-0 bg-[#131921] rounded-lg shadow-sm"
+                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                />
+              )}
+              <Link2 className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Channel File Linker</span>
+              <span className="relative z-10 bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-[11px]">
                 {books.filter((b) => !b.channelMessageId).length} unlinked
               </span>
-            </button>
+            </motion.button>
           </div>
 
           {activeSubTab === 'requests' ? (
-            <button
+            <motion.button
+              whileTap={{ scale: 0.95 }}
               onClick={fetchRequests}
               disabled={requestsLoading}
-              className="text-xs text-[#007185] hover:text-[#c45500] flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:border-gray-400 rounded-md transition-colors self-start sm:self-auto font-medium"
+              className="text-xs text-[#007185] hover:text-[#c45500] flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:border-gray-400 rounded-lg transition-colors self-start sm:self-auto font-medium cursor-pointer shadow-xs"
             >
               <Clock className="w-3.5 h-3.5" />
               {requestsLoading ? 'Refreshing...' : 'Refresh Wishlist'}
-            </button>
+            </motion.button>
           ) : (
             <div className="text-xs text-gray-500 hidden sm:block">
               {books.filter((b) => b.channelMessageId).length} of {books.length} titles connected to channel
@@ -529,6 +576,7 @@ export const CatalogManager: React.FC<Props> = ({
             <KindleHeroFeature
               books={heroBooks}
               book={heroBooks[0] || books[0]}
+              isAdmin={isAdmin}
               onOpenReader={(b) => setReadingBook(b)}
               onTestDeliver={handleTestDeliver}
               onExtractRAG={handleExtractRAG}
@@ -567,81 +615,110 @@ export const CatalogManager: React.FC<Props> = ({
               </div>
 
               {/* View Mode Switcher */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center bg-gray-100 p-1 rounded-md border border-gray-200 text-xs">
-                  <button
-                    onClick={() => setViewMode('shelves')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-medium transition-all ${
-                      viewMode === 'shelves'
-                        ? 'bg-white text-gray-900 shadow-sm font-bold border border-gray-200'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <Layers className="w-3.5 h-3.5 text-[#007185]" />
-                    <span>Curated Shelves</span>
-                  </button>
-
-                  <button
-                    onClick={() => setViewMode('grid')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-medium transition-all ${
-                      viewMode === 'grid'
-                        ? 'bg-white text-gray-900 shadow-sm font-bold border border-gray-200'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <LayoutGrid className="w-3.5 h-3.5 text-[#007185]" />
-                    <span>3D Gallery</span>
-                  </button>
-
-                  <button
-                    onClick={() => setViewMode('table')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded font-medium transition-all ${
-                      viewMode === 'table'
-                        ? 'bg-white text-gray-900 shadow-sm font-bold border border-gray-200'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    <TableIcon className="w-3.5 h-3.5 text-[#007185]" />
-                    <span>Index Table</span>
-                  </button>
+              <div className={`flex items-center gap-2 ${isAdmin ? '' : 'w-full lg:w-auto flex-1'}`}>
+                <div className={`flex items-center bg-gray-100 p-1 rounded-xl border border-gray-200 text-xs ${isAdmin ? '' : 'w-full lg:w-auto'}`}>
+                  {(['shelves', 'grid', 'table'] as const).map((mode) => {
+                    const isActive = viewMode === mode;
+                    const Icon = mode === 'shelves' ? Layers : mode === 'grid' ? LayoutGrid : TableIcon;
+                    const label = mode === 'shelves' ? 'Curated Shelves' : mode === 'grid' ? '3D Gallery' : 'Index Table';
+                    return (
+                      <motion.button
+                        key={mode}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => {
+                          triggerHaptic('light');
+                          setViewMode(mode);
+                        }}
+                        className={`relative flex-1 lg:flex-none flex justify-center items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                          isActive
+                            ? 'text-gray-900 font-bold'
+                            : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        {isActive && (
+                          <motion.div
+                            layoutId="activeViewModeIndicator"
+                            className="absolute inset-0 bg-white rounded-lg shadow-sm border border-gray-200"
+                            transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                          />
+                        )}
+                        <Icon className="w-3.5 h-3.5 text-[#007185] relative z-10" />
+                        <span className="relative z-10">{label}</span>
+                      </motion.button>
+                    );
+                  })}
                 </div>
 
-                <button
-                  onClick={() => setIsAdding(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-[#ffd814] hover:bg-[#f7ca00] text-[#0f1111] border border-[#fcd200] text-xs sm:text-sm font-bold rounded-md shadow-sm transition-all whitespace-nowrap"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Add Book</span>
-                </button>
+                {isAdmin && (
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      triggerHaptic('medium');
+                      setIsAdding(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#ffd814] hover:bg-[#f7ca00] text-[#0f1111] border border-[#fcd200] text-xs sm:text-sm font-bold rounded-lg shadow-sm transition-colors whitespace-nowrap cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Add Book</span>
+                  </motion.button>
+                )}
               </div>
             </div>
 
             {/* Category Chips Carousel */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar text-xs">
-              <button
-                onClick={() => setSelectedCategory('all')}
-                className={`px-3.5 py-1.5 rounded-full font-medium whitespace-nowrap transition-all ${
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.94 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setSelectedCategory('all');
+                }}
+                className={`relative px-3.5 py-1.5 rounded-full font-medium whitespace-nowrap transition-colors cursor-pointer ${
                   selectedCategory === 'all'
-                    ? 'bg-[#131921] text-white font-bold shadow-sm'
+                    ? 'text-white font-bold'
                     : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
                 }`}
               >
-                All Volumes ({books.length})
-              </button>
+                {selectedCategory === 'all' && (
+                  <motion.div
+                    layoutId="activeCategoryPill"
+                    className="absolute inset-0 bg-[#131921] rounded-full shadow-sm"
+                    transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">All Volumes {isAdmin && `(${books.length})`}</span>
+              </motion.button>
 
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-1.5 rounded-full font-medium whitespace-nowrap transition-all ${
-                    selectedCategory === cat
-                      ? 'bg-[#131921] text-white font-bold shadow-sm'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
+              {categories.map((cat) => {
+                const isSelected = selectedCategory === cat;
+                return (
+                  <motion.button
+                    key={cat}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.94 }}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setSelectedCategory(cat);
+                    }}
+                    className={`relative px-3.5 py-1.5 rounded-full font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'text-white font-bold'
+                        : 'bg-white border border-gray-300 text-gray-700 hover:border-gray-400'
+                    }`}
+                  >
+                    {isSelected && (
+                      <motion.div
+                        layoutId="activeCategoryPill"
+                        className="absolute inset-0 bg-[#131921] rounded-full shadow-sm"
+                        transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                      />
+                    )}
+                    <span className="relative z-10">{cat}</span>
+                  </motion.button>
+                );
+              })}
             </div>
           </div>
 
@@ -691,7 +768,11 @@ export const CatalogManager: React.FC<Props> = ({
                       <th className="py-3 px-4">Category</th>
                       <th className="py-3 px-4">Rating</th>
                       <th className="py-3 px-4">Difficulty</th>
-                      <th className="py-3 px-4">Channel File</th>
+                      {isAdmin ? (
+                        <th className="py-3 px-4">Channel File</th>
+                      ) : (
+                        <th className="py-3 px-4">Availability</th>
+                      )}
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -705,7 +786,9 @@ export const CatalogManager: React.FC<Props> = ({
                           >
                             {book.title}
                           </button>
-                          <p className="text-[11px] text-gray-500">{book.author} ({book.publicationYear})</p>
+                          <p className="text-[11px] text-gray-500">
+                            {book.author} {book.publicationYear ? `(${book.publicationYear})` : ''}
+                          </p>
                         </td>
                         <td className="py-3 px-4">
                           <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-[11px]">
@@ -715,12 +798,23 @@ export const CatalogManager: React.FC<Props> = ({
                         <td className="py-3 px-4 text-[#ffa41c] font-bold">★ {book.ratingScore}</td>
                         <td className="py-3 px-4 capitalize text-gray-600">{book.difficulty}</td>
                         <td className="py-3 px-4">
-                          {book.channelMessageId ? (
-                            <span className="text-[11px] font-mono font-semibold text-[#007600] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                              Msg #{book.channelMessageId}
-                            </span>
+                          {isAdmin ? (
+                            book.channelMessageId ? (
+                              <span className="text-[11px] font-mono font-semibold text-[#007600] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                Msg #{book.channelMessageId}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-gray-400">Unlinked</span>
+                            )
                           ) : (
-                            <span className="text-[11px] text-gray-400">Unlinked</span>
+                            book.channelMessageId ? (
+                              <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                Available
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-gray-400">Digital Copy</span>
+                            )
                           )}
                         </td>
                         <td className="py-3 px-4 text-right space-x-2">
@@ -730,13 +824,22 @@ export const CatalogManager: React.FC<Props> = ({
                           >
                             Read
                           </button>
-                          {book.channelMessageId && (
+                          {isAdmin && book.channelMessageId && (
                             <button
                               onClick={() => handleTestDeliver(book)}
                               disabled={deliveringBookId === book.id}
                               className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-[#007600] border border-emerald-200 font-semibold rounded text-[11px] transition-colors"
                             >
                               {deliveringBookId === book.id ? 'Sending...' : 'Deliver'}
+                            </button>
+                          )}
+                          {!isAdmin && book.channelMessageId && (
+                            <button
+                              onClick={() => handleTestDeliver(book)}
+                              title="Get on Telegram"
+                              className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-semibold rounded text-[11px] transition-colors"
+                            >
+                              Get on Telegram
                             </button>
                           )}
                         </td>
@@ -771,23 +874,29 @@ export const CatalogManager: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Delivery Toast */}
-          {deliveryResult && (
-            <div
-              className={`fixed bottom-6 right-6 z-50 p-4 rounded-2xl shadow-2xl text-xs flex items-center gap-2.5 ${
-                deliveryResult.ok
-                  ? 'bg-emerald-950 border border-emerald-500 text-emerald-200'
-                  : 'bg-rose-950 border border-rose-500 text-rose-200'
-              }`}
-            >
-              {deliveryResult.ok ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <AlertCircle className="w-4 h-4 text-rose-400" />
-              )}
-              <span>{deliveryResult.msg}</span>
-            </div>
-          )}
+          {/* Delivery Toast with spring physics */}
+          <AnimatePresence>
+            {deliveryResult && (
+              <motion.div
+                initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                className={`fixed bottom-6 right-6 z-50 p-4 rounded-2xl shadow-2xl text-xs flex items-center gap-2.5 backdrop-blur-md ${
+                  deliveryResult.ok
+                    ? 'bg-emerald-950/95 border border-emerald-500/80 text-emerald-200 shadow-emerald-900/30'
+                    : 'bg-rose-950/95 border border-rose-500/80 text-rose-200 shadow-rose-900/30'
+                }`}
+              >
+                {deliveryResult.ok ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 animate-bounce" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span className="font-medium">{deliveryResult.msg}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
@@ -1312,12 +1421,25 @@ export const CatalogManager: React.FC<Props> = ({
       {/* Interactive Amazon Kindle Cloud Reader Modal */}
       <KindleReaderModal
         book={readingBook}
+        isAdmin={isAdmin}
         onClose={() => setReadingBook(null)}
         onTestDeliver={handleTestDeliver}
         onExtractRAG={handleExtractRAG}
         isDelivering={deliveringBookId === readingBook?.id}
         extractingRAGId={extractingRAGBookId}
         ragSuccessMsg={readingBook ? extractedRAGSuccess[readingBook.id] : undefined}
+      />
+
+      {/* Connect Telegram Delivery Modal */}
+      <TelegramConnectModal
+        isOpen={Boolean(connectModalBook)}
+        book={connectModalBook}
+        onClose={() => setConnectModalBook(null)}
+        onConnected={(newChatId) => {
+          if (connectModalBook) {
+            handleTestDeliver(connectModalBook);
+          }
+        }}
       />
     </div>
   );

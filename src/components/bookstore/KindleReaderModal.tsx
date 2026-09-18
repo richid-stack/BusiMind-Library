@@ -20,9 +20,11 @@ import {
   Coffee,
   Check,
 } from 'lucide-react';
+import { triggerHaptic } from '../../lib/telegram';
 
 interface Props {
   book: Book | null;
+  isAdmin?: boolean;
   onClose: () => void;
   onTestDeliver: (book: Book) => void;
   onExtractRAG: (book: Book) => void;
@@ -36,6 +38,7 @@ type FontSize = 'sm' | 'base' | 'lg';
 
 export const KindleReaderModal: React.FC<Props> = ({
   book,
+  isAdmin = false,
   onClose,
   onTestDeliver,
   onExtractRAG,
@@ -51,6 +54,7 @@ export const KindleReaderModal: React.FC<Props> = ({
   if (!book) return null;
 
   const handleCopyTakeaway = (text: string, idx: number) => {
+    triggerHaptic('medium');
     navigator.clipboard.writeText(text);
     setCopiedTakeaway(idx);
     setTimeout(() => setCopiedTakeaway(null), 2000);
@@ -128,62 +132,94 @@ export const KindleReaderModal: React.FC<Props> = ({
           {/* Controls: Theme, Font Size, Close */}
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {/* Theme Selector */}
-            <div className="flex items-center bg-black/20 p-1 rounded border border-white/10 text-xs">
-              <button
-                onClick={() => setTheme('obsidian')}
+            <div className="flex items-center bg-black/20 p-1 rounded-lg border border-white/10 text-xs">
+              <motion.button
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setTheme('obsidian');
+                }}
                 title="Obsidian Dark Theme"
-                className={`p-1.5 rounded transition-colors ${theme === 'obsidian' ? 'bg-[#232f3e] text-[#f3a847]' : 'text-gray-400 hover:text-white'}`}
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${theme === 'obsidian' ? 'bg-[#232f3e] text-[#f3a847]' : 'text-gray-400 hover:text-white'}`}
               >
                 <Moon className="w-3.5 h-3.5" />
-              </button>
+              </motion.button>
 
-              <button
-                onClick={() => setTheme('sepia')}
+              <motion.button
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setTheme('sepia');
+                }}
                 title="Sepia Theme"
-                className={`p-1.5 rounded transition-colors ${theme === 'sepia' ? 'bg-[#dfd3b6] text-[#433422]' : 'text-gray-400 hover:text-white'}`}
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${theme === 'sepia' ? 'bg-[#dfd3b6] text-[#433422]' : 'text-gray-400 hover:text-white'}`}
               >
                 <Coffee className="w-3.5 h-3.5" />
-              </button>
+              </motion.button>
 
-              <button
-                onClick={() => setTheme('paper')}
+              <motion.button
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setTheme('paper');
+                }}
                 title="Paper Light Theme"
-                className={`p-1.5 rounded transition-colors ${theme === 'paper' ? 'bg-gray-200 text-gray-900' : 'text-gray-400 hover:text-white'}`}
+                className={`p-1.5 rounded-md transition-colors cursor-pointer ${theme === 'paper' ? 'bg-gray-200 text-gray-900' : 'text-gray-400 hover:text-white'}`}
               >
                 <Sun className="w-3.5 h-3.5" />
-              </button>
+              </motion.button>
             </div>
 
             {/* Font Size Selector */}
-            <div className="flex items-center bg-black/20 p-1 rounded border border-white/10 text-[11px] font-bold">
-              <button
-                onClick={() => setFontSize('sm')}
-                className={`px-2 py-1 rounded ${fontSize === 'sm' ? 'bg-white/20 text-white' : 'text-gray-400'}`}
+            <div className="flex items-center bg-black/20 p-1 rounded-lg border border-white/10 text-[11px] font-bold">
+              <motion.button
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setFontSize('sm');
+                }}
+                className={`px-2 py-1 rounded cursor-pointer ${fontSize === 'sm' ? 'bg-white/20 text-white' : 'text-gray-400 hover:text-white'}`}
               >
                 A-
-              </button>
-              <button
-                onClick={() => setFontSize('base')}
-                className={`px-2 py-1 rounded ${fontSize === 'base' ? 'bg-white/20 text-white' : 'text-gray-400'}`}
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setFontSize('base');
+                }}
+                className={`px-2 py-1 rounded cursor-pointer ${fontSize === 'base' ? 'bg-white/20 text-white' : 'text-gray-400 hover:text-white'}`}
               >
                 A
-              </button>
-              <button
-                onClick={() => setFontSize('lg')}
-                className={`px-2 py-1 rounded ${fontSize === 'lg' ? 'bg-white/20 text-white' : 'text-gray-400'}`}
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  triggerHaptic('light');
+                  setFontSize('lg');
+                }}
+                className={`px-2 py-1 rounded cursor-pointer ${fontSize === 'lg' ? 'bg-white/20 text-white' : 'text-gray-400 hover:text-white'}`}
               >
                 A+
-              </button>
+              </motion.button>
             </div>
 
             {/* Close Button */}
-            <button
-              onClick={onClose}
-              className={`p-2 rounded border ${currentTheme.border} ${currentTheme.text} hover:bg-black/10 transition-colors`}
+            <motion.button
+              whileHover={{ rotate: 90 }}
+              whileTap={{ scale: 0.88 }}
+              onClick={() => {
+                triggerHaptic('light');
+                onClose();
+              }}
+              className={`p-2 rounded-lg border ${currentTheme.border} ${currentTheme.text} hover:bg-black/10 transition-colors cursor-pointer`}
               title="Close Reader"
             >
               <X className="w-4 h-4" />
-            </button>
+            </motion.button>
           </div>
         </div>
 
@@ -263,41 +299,61 @@ export const KindleReaderModal: React.FC<Props> = ({
             {/* Quick Action CTAs */}
             <div className="pt-4 space-y-2">
               {book.channelMessageId && (
-                <button
-                  onClick={() => onTestDeliver(book)}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => {
+                    triggerHaptic('medium');
+                    onTestDeliver(book);
+                  }}
                   disabled={isDelivering}
-                  className="w-full py-2.5 px-3 bg-[#ffa41c] hover:bg-[#fa8900] text-[#0f1111] font-bold rounded-full text-xs flex items-center justify-center gap-2 shadow-sm transition-colors border border-[#ff8f00]"
+                  className="w-full py-2.5 px-3 bg-[#ffa41c] hover:bg-[#fa8900] text-[#0f1111] font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-colors border border-[#ff8f00] cursor-pointer disabled:opacity-50"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{isDelivering ? 'Dispatching to Bot...' : '⚡ Send Book to Telegram'}</span>
-                </button>
+                  <span>{isDelivering ? 'Dispatching to Bot...' : '⚡ Get Book on Telegram'}</span>
+                </motion.button>
               )}
 
-              <button
-                onClick={() => onExtractRAG(book)}
-                disabled={extractingRAGId === book.id}
-                className="w-full py-2 px-3 bg-white hover:bg-gray-100 border border-gray-300 text-[#0f1111] font-semibold rounded-full text-xs flex items-center justify-center gap-2 transition-colors"
-              >
-                <Brain className="w-3.5 h-3.5" />
-                <span>{extractingRAGId === book.id ? 'Extracting Models...' : 'Extract RAG Mental Models'}</span>
-              </button>
+              {isAdmin && (
+                <>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.96 }}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      onExtractRAG(book);
+                    }}
+                    disabled={extractingRAGId === book.id}
+                    className="w-full py-2 px-3 bg-white hover:bg-gray-100 border border-gray-300 text-[#0f1111] font-semibold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Brain className="w-3.5 h-3.5" />
+                    <span>{extractingRAGId === book.id ? 'Extracting Models...' : 'Extract RAG Mental Models'}</span>
+                  </motion.button>
 
-              {ragSuccessMsg && (
-                <p className="text-[11px] text-[#007600] text-center font-semibold">
-                  ✓ {ragSuccessMsg}
-                </p>
+                  {ragSuccessMsg && (
+                    <motion.p
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="text-[11px] text-[#007600] text-center font-semibold"
+                    >
+                      ✓ {ragSuccessMsg}
+                    </motion.p>
+                  )}
+                </>
               )}
 
               {book.externalPurchaseUrl && (
-                <a
+                <motion.a
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
                   href={book.externalPurchaseUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className={`w-full py-1.5 px-3 rounded-full border ${currentTheme.border} ${currentTheme.subText} hover:${currentTheme.text} text-[11px] flex items-center justify-center gap-1.5 transition-colors`}
+                  className={`w-full py-1.5 px-3 rounded-xl border ${currentTheme.border} ${currentTheme.subText} hover:${currentTheme.text} text-[11px] flex items-center justify-center gap-1.5 transition-colors`}
                 >
                   <span>Publisher Official Edition</span>
                   <ExternalLink className="w-3 h-3" />
-                </a>
+                </motion.a>
               )}
             </div>
           </div>
@@ -305,243 +361,249 @@ export const KindleReaderModal: React.FC<Props> = ({
           {/* Right Column: Immersive Kindle Reader Content */}
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Reading Tabs */}
-            <div className={`flex items-center gap-4 px-6 pt-4 border-b ${currentTheme.border} overflow-x-auto custom-scrollbar shrink-0`}>
-              <button
-                onClick={() => setActiveTab('summary')}
-                className={`pb-2 text-xs font-semibold transition-all border-b-2 ${
-                  activeTab === 'summary'
-                    ? `border-[#e77600] ${currentTheme.text}`
-                    : `border-transparent ${currentTheme.subText} hover:${currentTheme.text}`
-                }`}
-              >
-                Executive Thesis
-              </button>
-
-              <button
-                onClick={() => setActiveTab('roi')}
-                className={`pb-2 text-xs font-semibold transition-all border-b-2 ${
-                  activeTab === 'roi'
-                    ? `border-[#e77600] ${currentTheme.text}`
-                    : `border-transparent ${currentTheme.subText} hover:${currentTheme.text}`
-                }`}
-              >
-                Strategic ROI & Career Value
-              </button>
-
-              <button
-                onClick={() => setActiveTab('takeaways')}
-                className={`pb-2 text-xs font-semibold transition-all border-b-2 ${
-                  activeTab === 'takeaways'
-                    ? `border-[#e77600] ${currentTheme.text}`
-                    : `border-transparent ${currentTheme.subText} hover:${currentTheme.text}`
-                }`}
-              >
-                Key Takeaways ({book.keyTakeaways?.length || 0})
-              </button>
-
-              <button
-                onClick={() => setActiveTab('models')}
-                className={`pb-2 text-xs font-semibold transition-all border-b-2 ${
-                  activeTab === 'models'
-                    ? `border-[#e77600] ${currentTheme.text}`
-                    : `border-transparent ${currentTheme.subText} hover:${currentTheme.text}`
-                }`}
-              >
-                Valuation Mental Models
-              </button>
+            <div className={`flex items-center gap-2 sm:gap-4 px-6 pt-3 border-b ${currentTheme.border} overflow-x-auto custom-scrollbar shrink-0`}>
+              {[
+                { id: 'summary', label: 'Executive Thesis' },
+                { id: 'roi', label: 'Strategic ROI & Career Value' },
+                { id: 'takeaways', label: `Key Takeaways (${book.keyTakeaways?.length || 0})` },
+                ...(isAdmin ? [{ id: 'models', label: 'Valuation Mental Models' }] : []),
+              ].map((tabItem) => {
+                const isActive = activeTab === tabItem.id;
+                return (
+                  <motion.button
+                    key={tabItem.id}
+                    whileTap={{ scale: 0.96 }}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setActiveTab(tabItem.id as any);
+                    }}
+                    className={`relative pb-3 px-1 text-xs font-semibold transition-colors cursor-pointer ${
+                      isActive ? currentTheme.text : `${currentTheme.subText} hover:${currentTheme.text}`
+                    }`}
+                  >
+                    <span>{tabItem.label}</span>
+                    {isActive && (
+                      <motion.div
+                        layoutId="readerActiveTabIndicator"
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#e77600] rounded-full"
+                        transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                      />
+                    )}
+                  </motion.button>
+                );
+              })}
             </div>
 
             {/* Reading Pane Scroll Area */}
             <div className="flex-1 p-6 sm:p-8 md:p-10 overflow-y-auto custom-scrollbar">
-              {/* TAB 1: EXECUTIVE THESIS */}
-              {activeTab === 'summary' && (
-                <div className="max-w-2xl space-y-6">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-amber-500 font-mono">
-                      Executive Summary & Synthesis
-                    </span>
-                    <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
-                      The Core Argument
-                    </h2>
-                  </div>
-
-                  <p className={`${fontSizeClass} ${currentTheme.text}`}>
-                    {book.description}
-                  </p>
-
-                  <div className={`p-4 sm:p-5 rounded-lg border ${currentTheme.border} bg-black/5 space-y-2`}>
-                    <div className="text-xs font-bold text-[#e77600] uppercase tracking-wider flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Why BusiMind Recommends This Volume</span>
-                    </div>
-                    <p className={`${fontSizeClass} italic ${currentTheme.text}`}>
-                      "{book.whyRecommended}"
-                    </p>
-                  </div>
-
-                  {book.bestFor && (
-                    <div className="pt-2">
-                      <h4 className={`text-xs font-bold uppercase tracking-wider ${currentTheme.subText} mb-1`}>
-                        Ideal Target Audience
-                      </h4>
-                      <p className={`text-xs sm:text-sm ${currentTheme.text}`}>
-                        {book.bestFor}
-                      </p>
-                    </div>
-                  )}
-
-                  {book.tags && book.tags.length > 0 && (
-                    <div className="pt-4 flex flex-wrap gap-1.5">
-                      {book.tags.map((tag, i) => (
-                        <span
-                          key={i}
-                          className={`text-[10px] px-2.5 py-1 rounded-md border ${currentTheme.border} ${currentTheme.subText}`}
-                        >
-                          #{tag}
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                >
+                  {/* TAB 1: EXECUTIVE THESIS */}
+                  {activeTab === 'summary' && (
+                    <div className="max-w-2xl space-y-6">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-amber-500 font-mono">
+                          Executive Summary & Synthesis
                         </span>
-                      ))}
+                        <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
+                          The Core Argument
+                        </h2>
+                      </div>
+
+                      <p className={`${fontSizeClass} ${currentTheme.text}`}>
+                        {book.description}
+                      </p>
+
+                      <div className={`p-4 sm:p-5 rounded-lg border ${currentTheme.border} bg-black/5 space-y-2`}>
+                        <div className="text-xs font-bold text-[#e77600] uppercase tracking-wider flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Why BusiMind Recommends This Volume</span>
+                        </div>
+                        <p className={`${fontSizeClass} italic ${currentTheme.text}`}>
+                          "{book.whyRecommended}"
+                        </p>
+                      </div>
+
+                      {book.bestFor && (
+                        <div className="pt-2">
+                          <h4 className={`text-xs font-bold uppercase tracking-wider ${currentTheme.subText} mb-1`}>
+                            Ideal Target Audience
+                          </h4>
+                          <p className={`text-xs sm:text-sm ${currentTheme.text}`}>
+                            {book.bestFor}
+                          </p>
+                        </div>
+                      )}
+
+                      {book.tags && book.tags.length > 0 && (
+                        <div className="pt-4 flex flex-wrap gap-1.5">
+                          {book.tags.map((tag, i) => (
+                            <span
+                              key={i}
+                              className={`text-[10px] px-2.5 py-1 rounded-md border ${currentTheme.border} ${currentTheme.subText}`}
+                            >
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* TAB 2: STRATEGIC ROI */}
-              {activeTab === 'roi' && (
-                <div className="max-w-2xl space-y-6">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-500 font-mono">
-                      Pragmatic Return On Investment
-                    </span>
-                    <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
-                      How This Multiplies Career & Wealth
-                    </h2>
-                  </div>
+                  {/* TAB 2: STRATEGIC ROI */}
+                  {activeTab === 'roi' && (
+                    <div className="max-w-2xl space-y-6">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-500 font-mono">
+                          Pragmatic Return On Investment
+                        </span>
+                        <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
+                          How This Multiplies Career & Wealth
+                        </h2>
+                      </div>
 
-                  <div className={`p-5 rounded-lg border border-[#007600]/30 bg-[#007600]/5 space-y-3`}>
-                    <p className={`${fontSizeClass} ${currentTheme.text}`}>
-                      {book.howItHelps ||
-                        'Equips you with cognitive models to avoid costly business pitfalls, identify asymmetrical market opportunities, and make superior capital allocation choices.'}
-                    </p>
-                  </div>
-
-                  <div className="space-y-4 pt-2">
-                    <h4 className={`text-sm font-bold ${currentTheme.text}`}>
-                      Direct Applications in Modern Enterprise:
-                    </h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className={`p-4 rounded-lg border ${currentTheme.border} bg-black/5`}>
-                        <div className="font-semibold text-xs text-[#e77600] mb-1">Valuation & Due Diligence</div>
-                        <p className={`text-xs ${currentTheme.subText}`}>
-                          Stress-tests financial multiples and operating margins against qualitative moats.
+                      <div className={`p-5 rounded-lg border border-[#007600]/30 bg-[#007600]/5 space-y-3`}>
+                        <p className={`${fontSizeClass} ${currentTheme.text}`}>
+                          {book.howItHelps ||
+                            'Equips you with cognitive models to avoid costly business pitfalls, identify asymmetrical market opportunities, and make superior capital allocation choices.'}
                         </p>
                       </div>
 
-                      <div className={`p-4 rounded-lg border ${currentTheme.border} bg-black/5`}>
-                        <div className="font-semibold text-xs text-[#007600] mb-1">Capital Preservation</div>
-                        <p className={`text-xs ${currentTheme.subText}`}>
-                          Inoculates decision-makers against FOMO, market euphoria, and liquidity miscalculations.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: KEY TAKEAWAYS */}
-              {activeTab === 'takeaways' && (
-                <div className="max-w-2xl space-y-5">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-amber-500 font-mono">
-                      Actionable Blueprint
-                    </span>
-                    <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
-                      Essential Chapter Takeaways
-                    </h2>
-                  </div>
-
-                  {book.keyTakeaways && book.keyTakeaways.length > 0 ? (
-                    <div className="space-y-3">
-                      {book.keyTakeaways.map((point, idx) => (
-                        <div
-                          key={idx}
-                          className={`p-4 rounded-lg border ${currentTheme.border} bg-black/5 flex items-start justify-between gap-3 group hover:border-[#e77600]/40 transition-colors`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <span className="w-6 h-6 rounded-full bg-[#f3a847]/20 text-[#f3a847] font-mono text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                              {idx + 1}
-                            </span>
-                            <p className={`${fontSizeClass} ${currentTheme.text}`}>
-                              {point}
+                      <div className="space-y-4 pt-2">
+                        <h4 className={`text-sm font-bold ${currentTheme.text}`}>
+                          Direct Applications in Modern Enterprise:
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className={`p-4 rounded-lg border ${currentTheme.border} bg-black/5`}>
+                            <div className="font-semibold text-xs text-[#e77600] mb-1">Valuation & Due Diligence</div>
+                            <p className={`text-xs ${currentTheme.subText}`}>
+                              Stress-tests financial multiples and operating margins against qualitative moats.
                             </p>
                           </div>
 
-                          <button
-                            onClick={() => handleCopyTakeaway(point, idx)}
-                            className="p-1.5 text-gray-500 hover:text-[#f3a847] opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Copy takeaway"
-                          >
-                            {copiedTakeaway === idx ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                          <div className={`p-4 rounded-lg border ${currentTheme.border} bg-black/5`}>
+                            <div className="font-semibold text-xs text-[#007600] mb-1">Capital Preservation</div>
+                            <p className={`text-xs ${currentTheme.subText}`}>
+                              Inoculates decision-makers against FOMO, market euphoria, and liquidity miscalculations.
+                            </p>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="py-8 text-center text-xs text-gray-500">
-                      No chapter takeaways logged for this title yet.
+                      </div>
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* TAB 4: VALUATION & MENTAL MODELS */}
-              {activeTab === 'models' && (
-                <div className="max-w-2xl space-y-5">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-400 font-mono">
-                      RAG Financial Engine
-                    </span>
-                    <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
-                      Integrated Mental Frameworks
-                    </h2>
-                  </div>
-
-                  <p className={`text-xs sm:text-sm ${currentTheme.subText}`}>
-                    These mental frameworks are extracted directly from <strong className={currentTheme.text}>{book.title}</strong> and are injected into BusiMind's DCF Valuation Lab to evaluate enterprise risk, terminal value, and management moats.
-                  </p>
-
-                  <div className="p-4 rounded-lg border border-indigo-500/30 bg-indigo-950/20 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Brain className="w-4 h-4 text-indigo-400" />
-                        <span className="font-bold text-xs text-indigo-200">
-                          {book.title} Framework Synthesis
+                  {/* TAB 3: KEY TAKEAWAYS */}
+                  {activeTab === 'takeaways' && (
+                    <div className="max-w-2xl space-y-5">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-amber-500 font-mono">
+                          Actionable Blueprint
                         </span>
+                        <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
+                          Essential Chapter Takeaways
+                        </h2>
                       </div>
-                      <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-mono px-2 py-0.5 rounded-full">
-                        ACTIVE IN LAB
-                      </span>
-                    </div>
-                    <p className={`text-xs ${currentTheme.text}`}>
-                      "{book.whyRecommended}"
-                    </p>
-                  </div>
 
-                  <div className="pt-2">
-                    <button
-                      onClick={() => onExtractRAG(book)}
-                      disabled={extractingRAGId === book.id}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-gray-900 font-bold rounded-lg text-xs flex items-center gap-2 shadow-md transition-colors"
-                    >
-                      <Brain className="w-3.5 h-3.5" />
-                      <span>{extractingRAGId === book.id ? 'Re-analyzing...' : 'Extract Fresh Models to RAG Base'}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+                      {book.keyTakeaways && book.keyTakeaways.length > 0 ? (
+                        <div className="space-y-3">
+                          {book.keyTakeaways.map((point, idx) => (
+                            <div
+                              key={idx}
+                              className={`p-4 rounded-lg border ${currentTheme.border} bg-black/5 flex items-start justify-between gap-3 group hover:border-[#e77600]/40 transition-colors`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <span className="w-6 h-6 rounded-full bg-[#f3a847]/20 text-[#f3a847] font-mono text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                                  {idx + 1}
+                                </span>
+                                <p className={`${fontSizeClass} ${currentTheme.text}`}>
+                                  {point}
+                                </p>
+                              </div>
+
+                              <motion.button
+                                whileHover={{ scale: 1.15 }}
+                                whileTap={{ scale: 0.85 }}
+                                onClick={() => handleCopyTakeaway(point, idx)}
+                                className="p-1.5 text-gray-500 hover:text-[#f3a847] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded"
+                                title="Copy takeaway"
+                              >
+                                {copiedTakeaway === idx ? (
+                                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 500, damping: 20 }}>
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  </motion.div>
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </motion.button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="py-8 text-center text-xs text-gray-500">
+                          No chapter takeaways logged for this title yet.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 4: VALUATION & MENTAL MODELS (Admin Only) */}
+                  {isAdmin && activeTab === 'models' && (
+                    <div className="max-w-2xl space-y-5">
+                      <div>
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-indigo-400 font-mono">
+                          RAG Financial Engine
+                        </span>
+                        <h2 className={`font-display text-2xl sm:text-3xl font-bold mt-1 ${currentTheme.text}`}>
+                          Integrated Mental Frameworks
+                        </h2>
+                      </div>
+
+                      <p className={`text-xs sm:text-sm ${currentTheme.subText}`}>
+                        These mental frameworks are extracted directly from <strong className={currentTheme.text}>{book.title}</strong> and are injected into BusiMind's DCF Valuation Lab to evaluate enterprise risk, terminal value, and management moats.
+                      </p>
+
+                      <div className="p-4 rounded-lg border border-indigo-500/30 bg-indigo-950/20 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Brain className="w-4 h-4 text-indigo-400" />
+                            <span className="font-bold text-xs text-indigo-200">
+                              {book.title} Framework Synthesis
+                            </span>
+                          </div>
+                          <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-mono px-2 py-0.5 rounded-full">
+                            ACTIVE IN LAB
+                          </span>
+                        </div>
+                        <p className={`text-xs ${currentTheme.text}`}>
+                          "{book.whyRecommended}"
+                        </p>
+                      </div>
+
+                      <div className="pt-2">
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.96 }}
+                          onClick={() => {
+                            triggerHaptic('medium');
+                            onExtractRAG(book);
+                          }}
+                          disabled={extractingRAGId === book.id}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-gray-900 font-bold rounded-lg text-xs flex items-center gap-2 shadow-md transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <Brain className="w-3.5 h-3.5" />
+                          <span>{extractingRAGId === book.id ? 'Re-analyzing...' : 'Extract Fresh Models to RAG Base'}</span>
+                        </motion.button>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
           </div>
         </div>

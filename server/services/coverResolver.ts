@@ -1,4 +1,5 @@
 import { stripForeignWatermarks } from './fileSanitizer';
+import { getCanonicalPublicationYear } from './canonicalBookDates';
 
 // In-memory cache for fast lookup
 const coverCache = new Map<string, string>();
@@ -58,6 +59,7 @@ export async function resolveBookMetadataAndCover(
   }
 
   const mainTitle = cleanTitle.split(/[:\-]/)[0].trim();
+  const canonicalYear = getCanonicalPublicationYear(cleanTitle, cleanAuthor) || getCanonicalPublicationYear(mainTitle, cleanAuthor);
 
   // 1. Google Books API Query (Works with or without optional API key)
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
@@ -106,13 +108,15 @@ export async function resolveBookMetadataAndCover(
             const isbn13Found = v.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13')?.identifier;
             const pubYear = v.publishedDate ? parseInt(v.publishedDate.slice(0, 4), 10) : undefined;
 
+            const validPubYear = canonicalYear || (!isNaN(pubYear) && pubYear <= 2024 ? pubYear : undefined);
+
             const result: ResolvedBookMetadata = {
               title: displayTitle || cleanTitle,
               author: resolvedAuthor,
               coverImageUrl: coverUrl,
               category: v.categories?.[0] || 'General Literature',
               description: v.description,
-              publishedYear: isNaN(pubYear) ? undefined : pubYear,
+              publishedYear: validPubYear,
               isbn13: isbn13Found || cleanIsbn || undefined,
             };
 
@@ -160,11 +164,13 @@ export async function resolveBookMetadataAndCover(
               ? doc.author_name.join(', ')
               : (cleanAuthor || 'Curated Library');
 
+            const olYear = canonicalYear || (doc.first_publish_year && doc.first_publish_year <= 2024 ? doc.first_publish_year : undefined);
+
             const result: ResolvedBookMetadata = {
               title: doc.title || cleanTitle,
               author: docAuthor,
               coverImageUrl: coverUrl,
-              publishedYear: doc.first_publish_year,
+              publishedYear: olYear,
             };
 
             metaCache.set(cacheKey, result);
@@ -184,6 +190,7 @@ export async function resolveBookMetadataAndCover(
     coverImageUrl: cleanIsbn && cleanIsbn.length >= 10
       ? `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`
       : undefined,
+    publishedYear: canonicalYear,
   };
 
   metaCache.set(cacheKey, fallbackResult);

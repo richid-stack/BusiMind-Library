@@ -8,6 +8,23 @@ import { bot, isBotTokenConfigured } from './server/telegram/bot';
 
 dotenv.config();
 
+process.on('uncaughtException', (err) => {
+  console.error('[Uncaught Exception] CRITICAL ERROR:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Unhandled Rejection] Promise:', promise, 'Reason:', reason);
+});
+
+const handleShutdown = async (signal: string) => {
+  console.log(`[BusiMind] Received ${signal}, closing bot polling cleanly...`);
+  await stopPollingRunner();
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+
 const app = express();
 const PORT = 3000;
 
@@ -17,11 +34,8 @@ app.use(express.json());
 app.use('/api', apiRouter);
 
 // Telegram Webhook Endpoint
-if (bot && isBotTokenConfigured) {
-  const handler = webhookCallback(bot, 'express');
-  app.use('/telegram/webhook', handler);
-  app.use('/api/telegram/webhook', handler);
-}
+// We are using long polling exclusively for this deployment to ensure stability across preview domains.
+// (webhookCallback is intentionally removed to avoid conflicts with bot.start())
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -60,14 +74,23 @@ export function startPollingRunner() {
     },
   }).catch((err: any) => {
     isPollingActive = false;
-    console.error('[BusiMind] Polling loop paused or interrupted:', err?.message || err);
-    // Auto-reconnect after 3 seconds if disconnected
-    setTimeout(() => {
-      if (!isPollingActive && bot && !bot.isRunning()) {
-        console.log('[BusiMind] Reconnecting Telegram polling runner...');
-        startPollingRunner();
-      }
-    }, 3000);
+    const isConflict = err?.error_code === 409 || err?.message?.includes('409');
+    if (isConflict) {
+      console.log('[BusiMind] Previous Telegram polling connection closing (409), resuming in 6s...');
+      setTimeout(() => {
+        if (!isPollingActive && bot && !bot.isRunning()) {
+          startPollingRunner();
+        }
+      }, 6000);
+    } else {
+      console.warn('[BusiMind] Polling loop paused:', err?.message || err);
+      setTimeout(() => {
+        if (!isPollingActive && bot && !bot.isRunning()) {
+          console.log('[BusiMind] Reconnecting Telegram polling runner...');
+          startPollingRunner();
+        }
+      }, 3000);
+    }
   });
 }
 
@@ -82,26 +105,19 @@ async function initTelegramBotEngine() {
     await bot.init();
     console.log(`[BusiMind] Telegram Bot @${bot.botInfo.username} (ID: ${bot.botInfo.id}) initialized successfully.`);
   } catch (err: any) {
-    console.error('[BusiMind] Telegram bot.init() warning:', err?.message || err);
+    console.warn('[BusiMind] Telegram bot.init() warning:', err?.message || err);
   }
 
-  // 2. Check if a webhook is currently active on Telegram's side
+  // 2. Force delete any existing webhook so long polling works flawlessly
   try {
-    const webhookInfo = await bot.api.getWebhookInfo();
-    const hasWebhookUrl = Boolean(webhookInfo.url && webhookInfo.url.trim() !== '');
-
-    if (hasWebhookUrl) {
-      console.log(`[BusiMind] Telegram Webhook is ACTIVE at: ${webhookInfo.url}`);
-      return;
-    }
-
-    // No webhook active: start resilient polling
-    console.log('[BusiMind] No Telegram Webhook configured. Starting long polling runner...');
-    startPollingRunner();
-  } catch (err: any) {
-    console.error('[BusiMind] Failed to query webhook info, starting polling runner:', err?.message || err);
-    startPollingRunner();
+    await bot.api.deleteWebhook({ drop_pending_updates: false });
+    console.log('[BusiMind] Cleared any existing webhooks.');
+  } catch (e) {
+    console.warn('[BusiMind] Non-fatal error deleting webhook:', e);
   }
+
+  console.log('[BusiMind] Starting long polling runner...');
+  startPollingRunner();
 }
 
 // Register webhook toggle hooks
@@ -114,8 +130,6 @@ setWebhookLifecycleHooks({
 initTelegramBotEngine();
 
 async function startServer() {
-  const { store } = await import('./server/data/store');
-  await store.initializeFirestore();
   // Vite middleware in development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -134,6 +148,11 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[BusiMind] Server active and listening on http://0.0.0.0:${PORT}`);
   });
+
+  // Background store initialization so server starts instantly
+  import('./server/data/store')
+    .then(({ store }) => store.initializeFirestore())
+    .catch((err) => console.warn('[BusiMindStore] Notice during store startup:', err?.message || err));
 }
 
 startServer();

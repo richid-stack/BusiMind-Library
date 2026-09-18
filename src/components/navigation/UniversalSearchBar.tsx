@@ -67,12 +67,12 @@ export const UniversalSearchBar: React.FC<Props> = ({
 
     const timer = setTimeout(async () => {
       setLoading(true);
+      setIsOpen(true);
       try {
         const res = await apiFetch(`/api/search?q=${encodeURIComponent(query.trim())}`);
         if (res.ok) {
           const data = await res.json();
           setResults(data);
-          setIsOpen(true);
         }
       } catch (err) {
         console.warn('Search query error:', err);
@@ -171,13 +171,44 @@ export const UniversalSearchBar: React.FC<Props> = ({
       </div>
 
       {/* Real-time Results Popover */}
-      {isOpen && results && (
+      {isOpen && (loading || results) && (
         <div className="absolute top-full left-0 right-0 mt-1.5 bg-white text-[#0f1111] rounded-lg shadow-2xl border border-gray-200 overflow-hidden z-50 max-h-[75vh] overflow-y-auto animate-fadeIn custom-scrollbar">
-          {results.totalResults === 0 ? (
+          {loading ? (
+            <div className="p-4 space-y-4">
+              <div className="space-y-3">
+                <div className="h-3 w-32 bg-gray-200 rounded animate-pulse" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="flex items-center gap-2.5 p-2 rounded-md border border-transparent">
+                      <div className="w-9 h-12 bg-gray-100 rounded shrink-0 animate-pulse" />
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="h-3 w-3/4 bg-gray-200 rounded animate-pulse" />
+                        <div className="h-2 w-1/2 bg-gray-100 rounded animate-pulse" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-3 pt-3 border-t border-gray-100">
+                <div className="h-3 w-40 bg-gray-200 rounded animate-pulse" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[1, 2].map((i) => (
+                    <div key={i} className="flex items-center justify-between p-2 rounded-md border border-gray-100">
+                      <div className="space-y-1.5 flex-1">
+                        <div className="h-3 w-1/3 bg-gray-200 rounded animate-pulse" />
+                        <div className="h-2 w-2/3 bg-gray-100 rounded animate-pulse" />
+                      </div>
+                      <div className="h-3 w-12 bg-gray-200 rounded animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : results?.totalResults === 0 ? (
             <div className="p-6 text-center text-sm text-gray-500">
               No results found for &quot;<strong>{query}</strong>&quot;. Try searching for &quot;Warren Buffett&quot;, &quot;MTNGH&quot;, &quot;DCF&quot;, or &quot;Fama French&quot;.
             </div>
-          ) : (
+          ) : results ? (
             <div className="divide-y divide-gray-100">
               {/* 1. Books Results */}
               {results.books.length > 0 && (
@@ -346,7 +377,7 @@ export const UniversalSearchBar: React.FC<Props> = ({
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>

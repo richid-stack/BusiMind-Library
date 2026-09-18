@@ -41,8 +41,10 @@ export async function enrichSingleBook(book: Book, force: boolean = false): Prom
     (book.title.includes(' - ') && isMessyAuthor) ||
     /^[a-z0-9\s]{2,}\.(pdf|epub)$/i.test(book.title);
 
+  const needsYear = !book.publicationYear || book.publicationYear >= 2025;
+
   // If already clean and has cover, skip unless forced
-  if (!force && !isMessyAuthor && !hasNoCover && !isMessyTitle) {
+  if (!force && !isMessyAuthor && !hasNoCover && !isMessyTitle && !needsYear) {
     return book;
   }
 
@@ -90,7 +92,7 @@ export async function enrichSingleBook(book: Book, force: boolean = false): Prom
     updates.description = resolved.description;
   }
 
-  if (resolved.publishedYear && (!book.publicationYear || book.publicationYear === 2026)) {
+  if (resolved.publishedYear && (!book.publicationYear || book.publicationYear >= 2025 || force)) {
     updates.publicationYear = resolved.publishedYear;
   }
 
@@ -121,7 +123,8 @@ export async function enrichCatalog(options?: {
           /^\d{2}[\s_.-]\d{2}[\s_.-]\d{4}/.test(b.title) ||
           b.title.toLowerCase().startsWith('oceanofpdf') ||
           b.title.toLowerCase().startsWith('microsoft word');
-        return needsCover || needsAuthor || needsTitle;
+        const needsYear = !b.publicationYear || b.publicationYear >= 2025;
+        return needsCover || needsAuthor || needsTitle || needsYear;
       });
 
   const total = candidates.length;
